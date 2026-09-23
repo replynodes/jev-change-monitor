@@ -17,6 +17,12 @@ These are integration/repro checks over the *committed* tree, not unit tests:
 3. Rubric citations — every fixture and example must cite the existing
    `docs/provenance-and-labeling.md` rubric path and may only reference
    `docs/...md` files that actually exist (no broken rubric paths).
+4. JEV_COMMAND value hygiene — a poisoned `JEV_COMMAND` (arbitrary command
+   text and credential-shaped tokens) is pushed through a fully configured
+   `JevCommandProvider`: `describe()` and a complete in-memory benchmark
+   artifact must never contain the raw command value, and any recorded
+   `command_label` must be a strict-allowlist basename. This is a
+   deterministic CLI/artifact inspection, not a unit test.
 
 `jev-monitor validate` runs the same checks; `jev-monitor redact-check` is the
 standalone deterministic entry point.
@@ -83,6 +89,25 @@ HASH_PROBE_PATH_SEGMENTS = (
     ("dataset", "sha256"),
     ("thresholds", "sha256"),
 )
+
+# JEV_COMMAND poison values: arbitrary command text plus credential-shaped
+# tokens. Assembled from parts so no credential-shaped literal exists in the
+# source tree (scripts/secret_scan.sh must stay green). Every poison's
+# executable does not exist, so execution fails instantly and deterministically
+# — the provider still records `provider.describe()` into the artifact, which
+# is exactly what the probe inspects.
+_CMD_POISON_BIN1 = "/opt/evil/runner_2026 --token sk-" + "abcdef0123456789abcdef0123456789ab"
+_CMD_POISON_BIN2 = "/usr/bin/tool --api-key rn_live_" + "abcdef0123456789abcdef0123"
+_CMD_POISON_BIN3 = "/tmp/no-such-binary --flag ghp_" + "abcdefghijklmnopqrstuvwxyz123456"
+_CMD_POISON_EXE = "sk-" + "abcdefghijklmn1234567890abcdefgh"
+_CMD_POISONS = [_CMD_POISON_BIN1, _CMD_POISON_BIN2, _CMD_POISON_BIN3, _CMD_POISON_EXE]
+_CMD_CREDENTIALS = [
+    "sk-" + "abcdef0123456789abcdef0123456789ab",
+    "rn_live_" + "abcdef0123456789abcdef0123",
+    "ghp_" + "abcdefghijklmnopqrstuvwxyz123456",
+    "sk-" + "abcdefghijklmn1234567890abcdefgh",
+]
+_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def _iter_hash_strings(node, key=None, path=()):
@@ -209,10 +234,95 @@ def rubric_citations(datasets_dir: Path = DATASETS_DIR,
     return problems
 
 
+def command_value_probe() -> list[str]:
+    """Poison JEV_COMMAND; prove the raw value never reaches results.
+
+    Deterministic CLI/artifact inspection (not a unit test): with a fully
+    configured `JevCommandProvider`, `describe()` is written into every
+    benchmark artifact, so the probe asserts that (a) `describe()` contains
+    neither the raw command text nor credential tokens and only emits a
+    strict-allowlist basename at most, and (b) a complete in-memory benchmark
+    artifact recorded under the poisoned environment stays free of every
+    poison/credential string, remains schema-valid with the new provider
+    keys, and keeps an honest blocked launch claim. Every poison executable
+    does not exist, so all provider executions fail instantly and
+    deterministically (their withheld error rows are inspected too).
+    """
+    import os
+
+    from jev_change_monitor.benchmark import runner
+    from jev_change_monitor.providers.jev_command import JevCommandProvider
+    from jev_change_monitor.schemas import validate_schema
+
+    problems: list[str] = []
+
+    def label_ok(label) -> bool:
+        return label is None or bool(_LABEL_RE.match(label))
+
+    original = os.environ.get("JEV_COMMAND")
+    try:
+        for poison in _CMD_POISONS:
+            os.environ["JEV_COMMAND"] = poison
+            describe = JevCommandProvider().describe()
+            blob = json.dumps(describe, sort_keys=True)
+            if poison in blob:
+                problems.append("command probe: raw JEV_COMMAND text reached describe()")
+            if describe.get("command") not in (None,):
+                problems.append("command probe: describe() exposes a command value")
+            label = describe.get("command_label")
+            if not label_ok(label):
+                problems.append(f"command probe: unsafe command_label {label!r}")
+            if poison.startswith("sk-") and label is not None:
+                problems.append("command probe: credential-shaped executable leaked as label")
+
+        # Full-artifact inspection: run the benchmark with the first poison so
+        # provider.describe() AND per-case error rows are persisted, then prove
+        # no poison/credential text entered the artifact.
+        poison = _CMD_POISONS[0]
+        os.environ["JEV_COMMAND"] = poison
+        provider = JevCommandProvider()
+        artifact = runner.run(
+            split="held_out",
+            provider_name=provider.name,
+            provider=provider,
+            out_path=None,
+            fault_injection_rate=0.0,
+            command="jev-monitor redact-check (command-poison probe)",
+        )
+        artifact_blob = json.dumps(artifact, sort_keys=True, ensure_ascii=False)
+        for token in _CMD_POISONS + _CMD_CREDENTIALS:
+            if token in artifact_blob:
+                problems.append("command probe: poison/credential text reached the result artifact")
+        if artifact.get("provider", {}).get("command") not in (None,):
+            problems.append("command probe: artifact provider exposes a command value")
+        artifact_label = artifact.get("provider", {}).get("command_label")
+        if not label_ok(artifact_label):
+            problems.append("command probe: artifact command_label is unsafe")
+        if artifact.get("provider", {}).get("command_label") != "runner_2026":
+            problems.append("command probe: expected safe basename label 'runner_2026'")
+        errors = validate_schema(artifact, "benchmark-result")
+        if errors:
+            problems.append(f"command probe: artifact schema-invalid: {'; '.join(errors)}")
+        if artifact.get("launch_claim", {}).get("status") not in ("blocked", "failed"):
+            problems.append("command probe: artifact launch claim must stay blocked/failed "
+                            "(never passed)")
+        for row in artifact.get("cases", []):
+            provider_error = (row.get("result_record") or {}).get("provider_error") or ""
+            if poison in provider_error or "runner_2026 --token" in provider_error:
+                problems.append("command probe: provider_error echoed the command value")
+    finally:
+        if original is None:
+            os.environ.pop("JEV_COMMAND", None)
+        else:
+            os.environ["JEV_COMMAND"] = original
+    return problems
+
+
 def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     """All deterministic integrity checks; one problem per list entry."""
     problems: list[str] = []
     problems.extend(redaction_probe())
     problems.extend(committed_artifact_checks(results_committed))
     problems.extend(rubric_citations())
+    problems.extend(command_value_probe())
     return problems

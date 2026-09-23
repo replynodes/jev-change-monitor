@@ -135,7 +135,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(f"  FAIL {problem}")
     problems.extend(f"redact-check: {p}" for p in integrity_problems)
     if not integrity_problems:
-        print("  ok  hash fields byte-exact; secret-shaped values redacted; rubric paths resolve")
+        print("  ok  hash fields byte-exact; secret-shaped values redacted; rubric paths "
+              "resolve; JEV_COMMAND values never persist")
 
     if problems:
         print("\n".join(f"  - {p}" for p in problems))
@@ -275,7 +276,7 @@ def cmd_redact_check(args: argparse.Namespace) -> int:
             print(f"FAIL: {problem}")
         return _fail(f"{len(problems)} integrity problem(s)")
     print("redact-check: PASS (hash fields byte-exact; secret-shaped values redacted; "
-          "rubric paths resolve)")
+          "rubric paths resolve; JEV_COMMAND values never persist)")
     return 0
 
 

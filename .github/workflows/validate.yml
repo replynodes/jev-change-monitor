@@ -22,10 +22,17 @@ jobs:
         run: jev-monitor validate
       - name: Redaction integrity + rubric citations
         run: jev-monitor redact-check
-      - name: Deterministic benchmark (held-out)
-        run: jev-monitor benchmark --split held_out --provider heuristic
-      - name: Reproducibility check
+      - name: Deterministic benchmark (held-out, ephemeral output)
+        # Writes to the gitignored results/runs/ dir. Committed artifacts
+        # under results/committed/ stay read-only; repro-check below compares
+        # against the untouched committed blob.
+        run: jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
+      - name: Fault-injection benchmark (ephemeral output)
+        run: jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09 --out results/runs/held_out-deterministic-fault-injection.json
+      - name: Reproducibility check (against committed artifacts)
         run: jev-monitor repro-check --split held_out
+      - name: Committed artifacts stay read-only (worktree clean)
+        run: test -z "$(git status --porcelain)" || { echo "worktree has changes:"; git status --porcelain; exit 1; }
       - name: Webhook contract roundtrip
         run: jev-monitor webhook-demo
       - name: Secret scan

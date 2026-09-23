@@ -30,6 +30,9 @@
         "endpoint_configured": { "type": ["string", "boolean"] },
         "api_key_configured": { "type": ["string", "boolean"] },
         "command_configured": { "type": ["string", "boolean"] },
+        "command_label": { "type": ["string", "null"] },
+        "timeout_s": { "type": "number" },
+        "retries": { "type": "integer", "minimum": 0 },
         "notes": { "type": "string" }
       }
     },

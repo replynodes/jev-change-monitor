@@ -17,14 +17,19 @@ executable plus literal arguments. A deliberate shell pipeline/expansion
 contract is not supported.
 
 Credential discipline: the value passed to the command is environment-only;
-the command string itself must not contain secrets. If `JEV_COMMAND` is
-unset, this provider reports itself as not-configured and never runs.
+the command string itself must not contain secrets. The raw command value is
+never persisted or printed: `describe()` reports only a configured flag plus
+an executable basename when it survives a strict allowlist (credential-shaped
+names yield `command_label: null`), and failure messages never echo argv. If
+`JEV_COMMAND` is unset, this provider reports itself as not-configured and
+never runs.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import subprocess
 import time
@@ -33,6 +38,39 @@ from jev_change_monitor.detectors import DetectorSpec
 from jev_change_monitor.normalize import MAX_NORMALIZED_CHARS
 from jev_change_monitor.providers.base import ProviderResponse, bounded_evidence
 from jev_change_monitor.redact import env_flag, redact_value
+
+# Strict allowlist for the display label: a plain portable symbol token.
+# Anything with spaces, slashes, shell metacharacters or credential-shaped
+# prefixes fails and yields `command_label: null` instead of exposing text.
+_COMMAND_LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def safe_command_label(command: str) -> str | None:
+    """Executable basename of a configured command, only when it is safe.
+
+    The raw JEV_COMMAND value must never be persisted or printed. This
+    returns either a fixed, allowlisted basename (args are never included),
+    or None when the executable token is missing, unsafe, or itself
+    credential-shaped (so a secret string can never ride out as a label).
+    """
+    if not command:
+        return None
+    try:
+        argv = shlex.split(command)
+    except ValueError:
+        return None
+    if not argv:
+        return None
+    base = os.path.basename(argv[0])
+    if not base or base in (".", ".."):
+        return None
+    if not _COMMAND_LABEL_RE.match(base):
+        return None
+    if redact_value(base) != base:
+        # credential-shaped executable name: redaction would mask it, so we
+        # withhold the label rather than emit a redacted or leaking form.
+        return None
+    return base
 
 
 def _unwrap(payload: dict | str) -> dict:
@@ -126,7 +164,11 @@ class JevCommandProvider:
             except subprocess.TimeoutExpired:
                 last_error = "timeout"
             except Exception as exc:  # noqa: BLE001 - normalize provider failure
-                last_error = f"{type(exc).__name__}: {exc}"
+                # shlex/OSError/decode messages can echo the JEV_COMMAND value
+                # (e.g. FileNotFoundError includes argv) or raw stdout. The
+                # command value must never reach a result artifact, so the
+                # exception detail is withheld.
+                last_error = f"{type(exc).__name__} (details withheld)"
             finally:
                 pass
         return ProviderResponse(
@@ -141,8 +183,8 @@ class JevCommandProvider:
             "provider": self.name,
             "mode": self.mode,
             "model": None,
-            "command": redact_value(self.command) if self.command else None,
             "command_configured": env_flag("JEV_COMMAND"),
+            "command_label": safe_command_label(self.command),
             "timeout_s": self.timeout_s,
             "retries": self.retries,
         }

@@ -89,8 +89,11 @@ pending independent label review, non-empty reasons) is recorded.
 
 `jev-monitor redact-check` proves in one deterministic pass that recorded
 SHA-256 fields stay byte-exact (never corrupted by redaction), secret-shaped
-values are still replaced, and every fixture cites the existing rubric at
-`docs/provenance-and-labeling.md`.
+values are still replaced, every fixture cites the existing rubric at
+`docs/provenance-and-labeling.md`, and a poisoned `JEV_COMMAND` (arbitrary
+command text plus credential-shaped tokens) never reaches
+`provider.describe()` or any result artifact — only a configured flag and an
+allowlisted executable basename may be recorded.
 
 ## Notes
 
