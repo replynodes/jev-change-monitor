@@ -178,15 +178,11 @@ def run(
     }
     overall = metrics_mod.aggregate_metrics(per_detector_metrics)
     threshold_results = thresholds_mod.evaluate(per_detector_metrics, thresholds)
-    launch = thresholds_mod.launch_status(threshold_results, evaluation_kind)
+    launch = thresholds_mod.launch_status(
+        threshold_results, evaluation_kind, human_labeled=accounting["human_labeled"]
+    )
 
     blocked_reasons = list(launch["reasons"])
-    if not accounting["human_labeled"]:
-        blocked_reasons.append(
-            "held-out labels are rubric-labeled drafts with review_status "
-            "'pending-independent-review'; independent human review/adjudication of disputed "
-            "cases has not been recorded"
-        )
     if not frozen_ok:
         blocked_reasons.append(f"threshold immutability check failed: {frozen_reason}")
 

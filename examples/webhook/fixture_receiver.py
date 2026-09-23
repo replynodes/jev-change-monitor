@@ -45,8 +45,15 @@ def serve(port: int, secret: str, tolerance: int) -> None:
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(b'{"verified":' + (b"true" if payload.ok else b"false") + b"}")
-            event_id = webhook._header(payload.headers, webhook.X_EVENT_ID)  # noqa: SLF001
-            print(f"event_id={event_id} ok={payload.ok} reason={payload.reason}")
+            # Log ONLY validated, bounded information: for a verified request the
+            # event_id comes from the HMAC-verified body (header/body consistency
+            # is enforced); for a rejected request we print the fixed reason string
+            # only — never unauthenticated header values.
+            if payload.ok:
+                verified_event_id = (payload.event or {}).get("event_id")
+                print(f"verified ok=True event_id={verified_event_id} reason={payload.reason}")
+            else:
+                print(f"verified ok=False reason={payload.reason}")
 
         def log_message(self, *args):  # silence stderr access logs
             return

@@ -31,6 +31,12 @@ Per #480/#493, the hosted product owns:
 - Slack/Telegram adapters and secrets (P1, not a launch capability)
 - production MCP orchestration
 
+Hosted ReplyNodes monitors are a **hosted follow-up** (tracked in
+replynodes/replynodes-fetcher#493 under the
+[ReplyNodes GitHub org](https://github.com/replynodes)): nothing in this OSS
+repository is a live hosted service, and no hosted monitors signup or endpoint
+is claimed or advertised here.
+
 Nothing in this repository implements, imports or copies ReplyNodes'
 production scheduler, auth, billing, outbox or MCP code, and no credentials or
 secrets from the hosted product are used here. The webhook example uses a

@@ -1,4 +1,4 @@
-.PHONY: install check validate benchmark demo webhook-demo repro gate scan lint
+.PHONY: install check validate benchmark demo webhook-demo repro gate scan redact-check lint
 
 install:
 	pip install -e .
@@ -35,10 +35,13 @@ gate:
 scan:
 	bash scripts/secret_scan.sh
 
+redact-check:
+	jev-monitor redact-check
+
 lint:
 	@test -z "$$(python3 -m compileall -q src scripts examples && echo dirty)" || (echo "compile check failed"; exit 1)
 	@echo "compileall OK"
 
 # Full local gate suite (no live Jev needed)
-all: validate benchmark benchmark-dev repro scan lint webhook-demo
+all: validate benchmark benchmark-dev repro scan redact-check lint webhook-demo
 	@echo "all local gates passed"

@@ -19,8 +19,8 @@
     "labeling": {
       "adjudication": null,
       "labeler": "rubric-labeled-draft (ai-author: hermes/jack-dev)",
-      "method": "single-labeler + pre-approved written rubric (docs/labeling-rubric.md)",
-      "notes": "Static fixture label produced against docs/labeling-rubric.md; independent human review/adjudication has not been recorded. Not a Jev output.",
+      "method": "single-labeler + pre-approved written rubric (docs/provenance-and-labeling.md)",
+      "notes": "Static fixture label produced against docs/provenance-and-labeling.md; independent human review/adjudication has not been recorded. Not a Jev output.",
       "review_status": "pending-independent-review",
       "rubric_version": "1.0"
     },

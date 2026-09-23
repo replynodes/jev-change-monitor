@@ -2,16 +2,22 @@ services:
   validate:
     build: .
     command: validate
-    volumes:
-      - ./results:/app/results
+    # Read-only: validates the committed artifacts baked into the image. No
+    # results mount — the container can never overwrite committed artifacts.
   benchmark:
     build: .
-    command: benchmark --split held_out --provider heuristic
+    # Writes to the ephemeral `benchmark-runs` named volume at
+    # /app/results/runs (gitignored host-side), NEVER over the committed
+    # artifacts baked into the image. Run-local output only.
+    command: benchmark --split held_out --provider heuristic --out /app/results/runs/held_out-deterministic.json
     volumes:
-      - ./results:/app/results
+      - benchmark-runs:/app/results/runs
   webhook-demo:
     build: .
     command: webhook-demo
   demo:
     build: .
     command: demo
+
+volumes:
+  benchmark-runs:

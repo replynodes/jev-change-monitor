@@ -41,7 +41,8 @@ Provenance
 Labels
 ------
 Every case carries a rubric-driven label produced by one labeler against
-docs/labeling-rubric.md, with `review_status: pending-independent-review`.
+`docs/provenance-and-labeling.md` (the pre-approved written rubric; see
+`datasets/README.md`), with `review_status: pending-independent-review`.
 No label is presented as independently human-adjudicated.
 """
 
@@ -66,7 +67,8 @@ DEV_AFTER_AT = "2026-09-09T00:00:00Z"
 RUBRIC_VERSION = "1.0"
 LABELER = "rubric-labeled-draft (ai-author: hermes/jack-dev)"
 REVIEW_STATUS = "pending-independent-review"
-LABELING_NOTES = ("Static fixture label produced against docs/labeling-rubric.md; "
+RUBRIC_PATH_REF = "docs/provenance-and-labeling.md"
+LABELING_NOTES = (f"Static fixture label produced against {RUBRIC_PATH_REF}; "
                   "independent human review/adjudication has not been recorded. Not a Jev output.")
 
 DERIVED_RETRIEVED_AT = "2026-09-23T14:20:53Z"
@@ -333,7 +335,7 @@ def _case(split: str, case_id: str, detector: str, subtype: str, before_html: st
             "should_alert": alert,
             "rationale": rationale,
             "labeling": {
-                "method": "single-labeler + pre-approved written rubric (docs/labeling-rubric.md)",
+                "method": f"single-labeler + pre-approved written rubric ({RUBRIC_PATH_REF})",
                 "labeler": LABELER,
                 "rubric_version": RUBRIC_VERSION,
                 "review_status": REVIEW_STATUS,

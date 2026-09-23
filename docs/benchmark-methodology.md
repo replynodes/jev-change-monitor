@@ -9,6 +9,7 @@ pip install -e .
 python3 scripts/generate_dataset.py --check
 
 jev-monitor validate                                  # ALL gates below
+jev-monitor redact-check                              # redaction integrity + rubric citations
 jev-monitor benchmark --split held_out --provider heuristic
 jev-monitor benchmark --split dev --provider heuristic
 jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09
@@ -54,6 +55,25 @@ judgement confusion matrix is reported alongside.
 
 Price also reports amount/currency/direction accuracy separately.
 
+### Price accuracy denominator (exact policy)
+
+The #487 gate `exact_price_accuracy >= 0.95` is measured over **evaluable
+price cases that carry an explicit extraction expectation** (`expected.price`
+— amount, currency and direction to match). No-price-token and pure-noise
+price cases without an extraction expectation are excluded by design: there is
+nothing to compare an extraction against, so including them would either fake
+a miss or silently drop them. The artifact records **both** numbers so the
+denominator is auditable:
+
+- `price_cases_total` — all evaluable price cases (the wider set).
+- `price_cases_with_expectation` — the denominator actually used for
+  `exact_price_accuracy` / `price_amount_accuracy` /
+  `price_currency_accuracy` / `price_direction_accuracy`.
+
+For the committed held-out run: 41 total price cases, 36 with an extraction
+expectation; the 5 excluded are no-price-token/noise edge cases without
+`expected.price`.
+
 Scores for undecidable rows (schema-invalid / provider-error) are excluded
 from precision/recall and reported in their own rates; the artifact records
 the counts.
@@ -73,7 +93,28 @@ artifact.
   credentials via environment variables; raw result provenance is preserved in
   the artifact.
 
-`launch_claim.status` is `passed` only for a live-jev run with all checks
-green; otherwise `blocked` (no runtime / labels not independently reviewed) or
-`failed` (live run below thresholds). Nothing in this repository claims the
-launch thresholds passed.
+`launch_claim.status` is `passed` **only** for a live-jev run with all checks
+green **and** `dataset.human_labeled == true` (every held-out label carries
+`labeling.review_status = "independent-review-complete"`); otherwise `blocked`
+(no runtime / labels pending independent review / a blocker is recorded) or
+`failed` (live run below thresholds). `jev-monitor gate --result <artifact>`
+refuses `PASS` while `launch_claim.reasons` is non-empty or
+`dataset.human_labeled` is false, so a launch blocker can never be reported as
+green. Nothing in this repository claims the launch thresholds passed.
+
+## Redaction integrity
+
+`jev-monitor redact-check` (also run inside `validate`) proves, over a fixed
+probe and every committed artifact, that recorded SHA-256/hash fields survive
+byte-exact and render as valid 64-hex digests (including e-prefixed hashes),
+that secret-shaped values are still replaced with `[REDACTED]`, that
+`config.config_sha256` recomputes from the artifact, and that all rubric
+citations resolve to `docs/provenance-and-labeling.md`.
+
+## Docker
+
+`docker compose run --rm validate` validates the committed artifacts baked
+into the image (read-only). `docker compose run --rm benchmark` writes
+run-local output to the ephemeral `benchmark-runs` named volume at
+`/app/results/runs` — it never overwrites committed result artifacts or dirties
+the working tree (see `docker-compose.yml`).

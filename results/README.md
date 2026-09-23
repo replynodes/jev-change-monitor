@@ -27,6 +27,11 @@ jev-monitor repro-check --split held_out             # deterministic metrics are
 Artifacts exclude volatile fields (latency, timestamps, run environment) when
 compared; see `runner.VOLATILE_KEYS` and `runner.comparable_view`.
 
+Reproducing inside Docker never touches the committed artifacts: `docker
+compose run --rm benchmark` writes run-local output to the ephemeral
+`benchmark-runs` named volume at `/app/results/runs` (see docker-compose.yml),
+and `docker compose run --rm validate` is read-only.
+
 ## Launch claim
 
 `live-jev-blocked.json` records `launch_claim.status = "blocked"`. The

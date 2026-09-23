@@ -6,6 +6,7 @@ validate     schemas + fixtures + counts + threshold immutability + result artif
 benchmark    run the detector benchmark for a split with a chosen provider
 repro-check  run the deterministic benchmark twice and compare (excluding latency)
 gate         evaluate a committed result artifact against the frozen thresholds
+redact-check deterministic redaction-integrity + rubric-citation check
 demo         run one example case per detector through a provider
 webhook-demo fixture sender -> fixture receiver roundtrip with HMAC verification
 providers    show which live Jev providers are configured (never values)
@@ -21,6 +22,7 @@ from pathlib import Path
 from jev_change_monitor import __version__
 from jev_change_monitor.benchmark import dataset, runner, thresholds as thresholds_mod
 from jev_change_monitor.detectors import VALID_DETECTORS, get_detector
+from jev_change_monitor.integrity import run_redact_check
 from jev_change_monitor.providers import get_provider
 from jev_change_monitor.redact import env_flag, redact_value
 from jev_change_monitor.schemas import list_schemas, validate_all_schemas, validate_schema
@@ -127,6 +129,14 @@ def cmd_validate(args: argparse.Namespace) -> int:
     print(f"  JEV_ENDPOINT {env_flag('JEV_ENDPOINT')}, JEV_API_KEY {env_flag('JEV_API_KEY')}, "
           f"JEV_COMMAND {env_flag('JEV_COMMAND')}")
 
+    print("== redaction integrity (hashes survive, secrets redacted) ==")
+    integrity_problems = run_redact_check()
+    for problem in integrity_problems:
+        print(f"  FAIL {problem}")
+    problems.extend(f"redact-check: {p}" for p in integrity_problems)
+    if not integrity_problems:
+        print("  ok  hash fields byte-exact; secret-shaped values redacted; rubric paths resolve")
+
     if problems:
         print("\n".join(f"  - {p}" for p in problems))
         return _fail(f"{len(problems)} validation problem(s)")
@@ -216,6 +226,13 @@ def cmd_repro_check(args: argparse.Namespace) -> int:
 
 
 def cmd_gate(args: argparse.Namespace) -> int:
+    """Honest gate: PASS requires status=passed, empty reasons AND labels done.
+
+    A blocked launch claim, a non-empty `launch_claim.reasons` list, or
+    `dataset.human_labeled != true` (labels still pending independent review)
+    always refuses PASS — the gate never reports green while a launch blocker
+    is recorded (#487). Deterministic over the artifact.
+    """
     path = Path(args.result)
     if not path.is_absolute():
         path = REPO_ROOT / path
@@ -225,6 +242,8 @@ def cmd_gate(args: argparse.Namespace) -> int:
         return _fail(f"result artifact invalid: {'; '.join(errors)}")
     print(f"artifact: {display_path(path)}")
     print(f"provider: {artifact['provider']['provider']} ({artifact['evaluation_kind']})")
+    human_labeled = artifact.get("dataset", {}).get("human_labeled") is True
+    print(f"label review: {('independent-review-complete' if human_labeled else 'pending-independent-review')}")
     print(f"launch claim: {artifact['launch_claim']['status']}")
     for reason in artifact["launch_claim"]["reasons"]:
         print(f"  reason: {reason}")
@@ -235,12 +254,28 @@ def cmd_gate(args: argparse.Namespace) -> int:
         bound = f">= {check['min']}" if check["min"] is not None else f"<= {check['max']}"
         print(f"  {'PASS' if check['passed'] else 'FAIL'} {check['detector']}.{check['metric']} "
               f"{observed} ({bound})")
-    if artifact["launch_claim"]["status"] == "blocked":
-        print("gate: BLOCKED — launch thresholds unverified (no live Jev evaluation)")
+    claim_status = artifact["launch_claim"]["status"]
+    if claim_status == "failed" and failed:
+        return _fail(f"{len(failed)} threshold check(s) failed")
+    if claim_status != "passed" or not human_labeled or artifact["launch_claim"]["reasons"]:
+        print("gate: BLOCKED — launch thresholds unverified (live Jev absent, labels pending "
+              "independent review, or a launch blocker is recorded)")
         return 2
     if failed:
         return _fail(f"{len(failed)} threshold check(s) failed")
     print("gate: PASS")
+    return 0
+
+
+def cmd_redact_check(args: argparse.Namespace) -> int:
+    """Deterministic redaction-integrity + rubric-citation check."""
+    problems = run_redact_check()
+    if problems:
+        for problem in problems:
+            print(f"FAIL: {problem}")
+        return _fail(f"{len(problems)} integrity problem(s)")
+    print("redact-check: PASS (hash fields byte-exact; secret-shaped values redacted; "
+          "rubric paths resolve)")
     return 0
 
 
@@ -491,6 +526,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate = sub.add_parser("gate", help="evaluate a result artifact against frozen thresholds")
     p_gate.add_argument("--result", required=True)
     p_gate.set_defaults(func=cmd_gate)
+
+    p_redact = sub.add_parser(
+        "redact-check",
+        help="deterministic redaction-integrity + rubric-citation check",
+    )
+    p_redact.set_defaults(func=cmd_redact_check)
 
     p_demo = sub.add_parser("demo", help="run an example case through a provider")
     p_demo.add_argument("--detector", choices=list(VALID_DETECTORS), default=None)

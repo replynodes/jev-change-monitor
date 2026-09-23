@@ -9,6 +9,14 @@ Demo/benchmark OSS repository, part of ReplyNodes Monitors
 (replynodes/replynodes-fetcher #480; OSS tracking issue #493; benchmark
 release gate #487). See `docs/boundary.md` for the exact hosted/OSS boundary.
 
+> **Hosted monitors (follow-up, not yet live)**: ReplyNodes hosted monitors
+> are a hosted follow-up tracked in
+> [replynodes/replynodes-fetcher#493](https://github.com/replynodes/replynodes-fetcher/issues/493)
+> under the [ReplyNodes GitHub org](https://github.com/replynodes). Nothing in
+> this repository is a live hosted service, and no hosted monitors signup or
+> endpoint is claimed here — this OSS repo demonstrates and benchmarks the
+> pattern only. See `docs/boundary.md`.
+
 ## What this repository demonstrates
 
 - Typed detector contracts for exactly three P0 detectors: `price`,
@@ -36,6 +44,7 @@ release gate #487). See `docs/boundary.md` for the exact hosted/OSS boundary.
 pip install -e .
 python3 scripts/generate_dataset.py --check   # fixtures match the generator
 jev-monitor validate                          # schemas, counts, thresholds, artifacts
+jev-monitor redact-check                      # hashes survive, secrets redacted, rubric paths resolve
 jev-monitor demo --detector price             # run one example case
 jev-monitor benchmark --split held_out --provider heuristic
 jev-monitor repro-check --split held_out      # deterministic metrics are byte-stable
@@ -45,8 +54,8 @@ jev-monitor webhook-demo                      # signed sender -> receiver roundt
 Docker:
 
 ```sh
-docker compose run --rm validate
-docker compose run --rm benchmark
+docker compose run --rm validate   # read-only check of the committed artifacts
+docker compose run --rm benchmark  # writes ONLY to an ephemeral named volume; never commits
 ```
 
 ## Repository layout
@@ -75,7 +84,13 @@ The launch thresholds from #487 are **not** passed by this repository today:
   review/adjudication, which is a separate launch blocker.
 
 `jev-monitor gate --result <artifact>` tells you the launch claim for any
-artifact.
+artifact and refuses `PASS` while any launch blocker (missing live Jev run,
+pending independent label review, non-empty reasons) is recorded.
+
+`jev-monitor redact-check` proves in one deterministic pass that recorded
+SHA-256 fields stay byte-exact (never corrupted by redaction), secret-shaped
+values are still replaced, and every fixture cites the existing rubric at
+`docs/provenance-and-labeling.md`.
 
 ## Notes
 

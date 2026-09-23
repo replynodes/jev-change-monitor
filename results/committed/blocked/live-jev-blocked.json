@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "271a821338357c7609124bd46daa422859dd43c60e2ade2fb0023b2e1166e189",
+  "artifact_sha256": "2f64bf6d04d542a014f2fa696d9eb10d352a82fde254a083db75c85dfebbdfce",
   "artifact_version": "1.0.0",
   "cases": [],
   "command": "jev-monitor blocked-live",
@@ -25,7 +25,7 @@
       "product_change": 35,
       "saas_pricing": 35
     },
-    "sha256": "3f54b0a124a07c2a8a1415e1d0b0e8422ff12eaeefb28012170accf8fb66f671",
+    "sha256": "11b54a8e471c0cd3367f5c2838cbb5e3469380354463a99bb6cada4bd58590aa",
     "split": "held_out"
   },
   "environment": {
@@ -33,7 +33,7 @@
     "python": "3.12.13"
   },
   "evaluation_kind": "live-jev",
-  "generated_at": "2026-09-23T14:32:55+00:00",
+  "generated_at": "2026-09-23T15:44:00+00:00",
   "launch_claim": {
     "criteria_source": "replynodes/replynodes-fetcher#487",
     "failed_checks": 8,

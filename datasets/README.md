@@ -9,8 +9,9 @@ equality).
   set for the release gates and is never used for tuning.
 - `dev/dev-cases.jsonl` — 15 development/tuning cases (5 per detector). Never
   counted toward held-out minimums.
-- `labeling-rubric.md`-equivalent policy lives in
-  `docs/provenance-and-labeling.md`.
+- The pre-approved written rubric and the labeling policy live in
+  `docs/provenance-and-labeling.md` (the rubric is a section of that file;
+  fixtures cite it as the rubric source).
 
 ## Split separation (issue #487)
 

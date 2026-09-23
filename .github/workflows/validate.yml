@@ -20,6 +20,8 @@ jobs:
         run: python3 scripts/generate_dataset.py --check
       - name: Full validation
         run: jev-monitor validate
+      - name: Redaction integrity + rubric citations
+        run: jev-monitor redact-check
       - name: Deterministic benchmark (held-out)
         run: jev-monitor benchmark --split held_out --provider heuristic
       - name: Reproducibility check

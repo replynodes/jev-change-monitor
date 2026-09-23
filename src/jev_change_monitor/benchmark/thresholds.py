@@ -85,18 +85,37 @@ def evaluate(metrics_per_detector: dict, thresholds: dict) -> list[dict]:
     return results
 
 
-def launch_status(threshold_results: list[dict], evaluation_kind: str) -> dict:
-    """Launch claim is only 'passed' for live Jev evaluation with all checks green."""
+_LABEL_REVIEW_REASON = (
+    "held-out labels are rubric-labeled drafts with review_status "
+    "'pending-independent-review'; independent human review/adjudication of "
+    "disputed cases has not been recorded, so the release gate cannot report "
+    "status=passed even when semantic thresholds observe green"
+)
+
+
+def launch_status(threshold_results: list[dict], evaluation_kind: str,
+                  human_labeled: bool = False) -> dict:
+    """Launch claim: 'passed' requires live Jev + all checks green + labels.
+
+    Independent human review/adjudication is a separate #487 release
+    requirement: `human_labeled` (all held-out fixtures carry
+    `labeling.review_status == "independent-review-complete"`) must be true,
+    otherwise the claim stays `blocked` even if every semantic threshold is
+    observed green — a PASS with pending labels would be dishonest.
+    """
     failed = [r for r in threshold_results if not r["passed"]]
     if evaluation_kind != "live-jev":
+        reasons = [
+            "no authorized live Jev runtime configured for this run; "
+            "semantic thresholds are unverified",
+            "deterministic-baseline numbers are pipeline evidence only and "
+            "must not be presented as launch evidence",
+        ]
+        if not human_labeled:
+            reasons.append(_LABEL_REVIEW_REASON)
         return {
             "status": "blocked",
-            "reasons": [
-                "no authorized live Jev runtime configured for this run; "
-                "semantic thresholds are unverified",
-                "deterministic-baseline numbers are pipeline evidence only and "
-                "must not be presented as launch evidence",
-            ],
+            "reasons": reasons,
             "failed_checks": len(failed),
         }
     if failed:
@@ -104,4 +123,15 @@ def launch_status(threshold_results: list[dict], evaluation_kind: str) -> dict:
             f"{r['detector']}.{r['metric']} observed {r['observed']} vs "
             f"{'min ' + str(r['min']) if r['min'] is not None else 'max ' + str(r['max'])}"
             for r in failed], "failed_checks": len(failed)}
+    if not human_labeled:
+        return {
+            "status": "blocked",
+            "reasons": [
+                _LABEL_REVIEW_REASON,
+                "semantic thresholds observed green, but the release gate "
+                "additionally requires independent human review/adjudication "
+                "of held-out labels before status=passed",
+            ],
+            "failed_checks": 0,
+        }
     return {"status": "passed", "reasons": [], "failed_checks": 0}

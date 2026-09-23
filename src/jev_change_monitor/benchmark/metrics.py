@@ -133,6 +133,13 @@ def detector_metrics(rows: list[dict], cost_model: dict) -> dict:
     }
 
     # price-specific extraction accuracy
+    # Denominator policy (#487 exact-price gate): exact_price_accuracy is
+    # measured over evaluable price cases that carry an explicit extraction
+    # expectation (`expected.price`). No-price-token / noise edge cases
+    # without an extraction expectation are excluded by design; the artifact
+    # records BOTH the total price case count and the expectation count so
+    # the denominator is auditable. See docs/benchmark-methodology.md.
+    all_price_rows = evaluable
     price_rows = [r for r in evaluable if r.get("expected", {}).get("price")]
     if price_rows:
         amount_ok = sum(1 for r in price_rows
@@ -148,7 +155,16 @@ def detector_metrics(rows: list[dict], cost_model: dict) -> dict:
                     == (r["expected"]["price"].get("currency") or "").upper()
                     and r["price_pred"].get("direction") == r["expected"]["price"].get("direction"))
         metrics.update({
+            "price_cases_total": len(all_price_rows),
+            "price_cases_total_note": (
+                "total evaluable price cases, including no-price-token/noise "
+                "cases without an extraction expectation"
+            ),
             "price_cases_with_expectation": len(price_rows),
+            "price_cases_with_expectation_note": (
+                "denominator for exact price/currency/direction accuracy; "
+                "no-price-token/noise cases without expected.price are excluded"
+            ),
             "price_amount_accuracy": _safe_div(amount_ok, len(price_rows)),
             "price_currency_accuracy": _safe_div(currency_ok, len(price_rows)),
             "price_direction_accuracy": _safe_div(direction_ok, len(price_rows)),
