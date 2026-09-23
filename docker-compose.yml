@@ -1,0 +1,17 @@
+services:
+  validate:
+    build: .
+    command: validate
+    volumes:
+      - ./results:/app/results
+  benchmark:
+    build: .
+    command: benchmark --split held_out --provider heuristic
+    volumes:
+      - ./results:/app/results
+  webhook-demo:
+    build: .
+    command: webhook-demo
+  demo:
+    build: .
+    command: demo

@@ -1,0 +1,192 @@
+{
+  "artifact_sha256": "271a821338357c7609124bd46daa422859dd43c60e2ade2fb0023b2e1166e189",
+  "artifact_version": "1.0.0",
+  "cases": [],
+  "command": "jev-monitor blocked-live",
+  "config": {
+    "config_sha256": null,
+    "fault_injection_rate": 0.0,
+    "faults_injected": 0
+  },
+  "cost_model": {
+    "configured": false,
+    "path": "benchmark/cost-model.json",
+    "source": "placeholder rates are not real Jev pricing"
+  },
+  "dataset": {
+    "cases_total": 111,
+    "duplicate_ids": [],
+    "edge_cases": 12,
+    "human_labeled": false,
+    "minimums_ok": true,
+    "path": "datasets/held_out/held-out-cases.jsonl",
+    "per_detector": {
+      "price": 41,
+      "product_change": 35,
+      "saas_pricing": 35
+    },
+    "sha256": "3f54b0a124a07c2a8a1415e1d0b0e8422ff12eaeefb28012170accf8fb66f671",
+    "split": "held_out"
+  },
+  "environment": {
+    "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+    "python": "3.12.13"
+  },
+  "evaluation_kind": "live-jev",
+  "generated_at": "2026-09-23T14:32:55+00:00",
+  "launch_claim": {
+    "criteria_source": "replynodes/replynodes-fetcher#487",
+    "failed_checks": 8,
+    "reasons": [
+      "no authorized live Jev runtime configured (JEV_ENDPOINT/JEV_API_KEY/JEV_COMMAND all unset); semantic thresholds (replynodes/replynodes-fetcher#487) are unverified",
+      "deterministic-baseline numbers are pipeline evidence only and must not be presented as launch evidence",
+      "held-out labels are rubric drafts with review_status 'pending-independent-review'; independent human review/adjudication of disputed cases has not been recorded"
+    ],
+    "status": "blocked"
+  },
+  "metrics": {
+    "overall": {
+      "cases": 0,
+      "evaluable_cases": 0,
+      "f1": null,
+      "false_alert_rate": null,
+      "false_change_rate": null,
+      "false_negative_rate": null,
+      "note": "no live provider configured; zero metrics recorded, semantic thresholds unverified",
+      "precision": null,
+      "provider_error_rate": null,
+      "recall": null,
+      "schema_invalid_rate": null
+    },
+    "per_detector": {
+      "price": {
+        "cases": 0,
+        "evaluable_cases": 0,
+        "f1": null,
+        "false_alert_rate": null,
+        "false_change_rate": null,
+        "false_negative_rate": null,
+        "note": "unverified",
+        "precision": null,
+        "provider_error_rate": null,
+        "recall": null,
+        "schema_invalid_rate": null
+      },
+      "product_change": {
+        "cases": 0,
+        "evaluable_cases": 0,
+        "f1": null,
+        "false_alert_rate": null,
+        "false_change_rate": null,
+        "false_negative_rate": null,
+        "note": "unverified",
+        "precision": null,
+        "provider_error_rate": null,
+        "recall": null,
+        "schema_invalid_rate": null
+      },
+      "saas_pricing": {
+        "cases": 0,
+        "evaluable_cases": 0,
+        "f1": null,
+        "false_alert_rate": null,
+        "false_change_rate": null,
+        "false_negative_rate": null,
+        "note": "unverified",
+        "precision": null,
+        "provider_error_rate": null,
+        "recall": null,
+        "schema_invalid_rate": null
+      }
+    }
+  },
+  "provider": {
+    "api_key_configured": "not-configured",
+    "command_configured": "not-configured",
+    "endpoint_configured": "not-configured",
+    "mode": "live",
+    "model": null,
+    "notes": "No authorized Jev runtime was available when this artifact was written.",
+    "provider": "jev-unavailable"
+  },
+  "run_id": "blocked-7ccba976e240",
+  "threshold_evaluation": [
+    {
+      "detector": "price",
+      "max": null,
+      "metric": "exact_price_accuracy",
+      "min": 0.95,
+      "observed": null,
+      "passed": false
+    },
+    {
+      "detector": "price",
+      "max": 0.02,
+      "metric": "false_change_rate",
+      "min": null,
+      "observed": null,
+      "passed": false
+    },
+    {
+      "detector": "saas_pricing",
+      "max": null,
+      "metric": "precision",
+      "min": 0.9,
+      "observed": null,
+      "passed": false
+    },
+    {
+      "detector": "saas_pricing",
+      "max": null,
+      "metric": "recall",
+      "min": 0.85,
+      "observed": null,
+      "passed": false
+    },
+    {
+      "detector": "saas_pricing",
+      "max": 0.1,
+      "metric": "false_alert_rate",
+      "min": null,
+      "observed": null,
+      "passed": false
+    },
+    {
+      "detector": "product_change",
+      "max": null,
+      "metric": "precision",
+      "min": 0.9,
+      "observed": null,
+      "passed": false
+    },
+    {
+      "detector": "product_change",
+      "max": null,
+      "metric": "recall",
+      "min": 0.8,
+      "observed": null,
+      "passed": false
+    },
+    {
+      "detector": "product_change",
+      "max": 0.1,
+      "metric": "false_alert_rate",
+      "min": null,
+      "observed": null,
+      "passed": false
+    }
+  ],
+  "thresholds": {
+    "frozen_lock_note": "thresholds match the pre-run lock",
+    "frozen_lock_ok": true,
+    "path": "benchmark/thresholds.json",
+    "sha256": "7ccba976e24012cda11761aba8720743a2f3c01d5dafb2f545205e49338e09a0",
+    "source_issues": [
+      "replynodes/replynodes-fetcher#487"
+    ]
+  },
+  "tool": {
+    "name": "jev-change-monitor",
+    "version": "0.1.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "lock_note": "Created before any held-out run. The implementing commit SHA is recorded in results/committed/*.json at run time.",
+  "locked_at_commit": null,
+  "locked_before_first_held_out_run": true,
+  "policy": "A change to benchmark/thresholds.json after this lock invalidates the held-out evaluation; it requires an explicit issue update before the next held-out run.",
+  "source_issues": [
+    "replynodes/replynodes-fetcher#487"
+  ],
+  "thresholds_path": "benchmark/thresholds.json",
+  "thresholds_sha256": "7ccba976e24012cda11761aba8720743a2f3c01d5dafb2f545205e49338e09a0"
+}

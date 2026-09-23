@@ -1,0 +1,779 @@
+{
+  "artifact_sha256": "07465db064f8f7ac596a21cf1738bd5fba7666db7e26c6e7004bf73e61883c74",
+  "artifact_version": "1.0.0",
+  "cases": [
+    {
+      "case_id": "dev-price-001",
+      "detector": "price",
+      "edge_case": false,
+      "label": {
+        "meaningful": true,
+        "should_alert": true
+      },
+      "predicted": {
+        "change_type": "price_drop",
+        "confidence": 0.6,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": true,
+        "should_alert": true
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 1622,
+        "latency_ms": 1.65,
+        "mode": "deterministic",
+        "output_bytes": 672,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "price_drop_dev"
+    },
+    {
+      "case_id": "dev-price-002",
+      "detector": "price",
+      "edge_case": false,
+      "label": {
+        "meaningful": false,
+        "should_alert": false
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.75,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 1622,
+        "latency_ms": 0.99,
+        "mode": "deterministic",
+        "output_bytes": 654,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "no_change_dev"
+    },
+    {
+      "case_id": "dev-price-003",
+      "detector": "price",
+      "edge_case": false,
+      "label": {
+        "meaningful": false,
+        "should_alert": false
+      },
+      "predicted": {
+        "change_type": "price_increase",
+        "confidence": 0.6,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": true,
+        "should_alert": true
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 1622,
+        "latency_ms": 0.99,
+        "mode": "deterministic",
+        "output_bytes": 680,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "footer_only_dev"
+    },
+    {
+      "case_id": "dev-price-004",
+      "detector": "price",
+      "edge_case": false,
+      "label": {
+        "meaningful": true,
+        "should_alert": true
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.75,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 1622,
+        "latency_ms": 1.0,
+        "mode": "deterministic",
+        "output_bytes": 648,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "annual_toggle_dev"
+    },
+    {
+      "case_id": "dev-price-005",
+      "detector": "price",
+      "edge_case": false,
+      "label": {
+        "meaningful": false,
+        "should_alert": false
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.75,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 1615,
+        "latency_ms": 1.01,
+        "mode": "deterministic",
+        "output_bytes": 654,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "testimonial_dev"
+    },
+    {
+      "case_id": "dev-saas-006",
+      "detector": "saas_pricing",
+      "edge_case": false,
+      "label": {
+        "meaningful": true,
+        "should_alert": true
+      },
+      "predicted": {
+        "change_type": "other_meaningful",
+        "confidence": 0.5,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": true,
+        "should_alert": true
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2532,
+        "latency_ms": 1.71,
+        "mode": "deterministic",
+        "output_bytes": 515,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "limit_dev"
+    },
+    {
+      "case_id": "dev-saas-007",
+      "detector": "saas_pricing",
+      "edge_case": false,
+      "label": {
+        "meaningful": false,
+        "should_alert": false
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.3,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2546,
+        "latency_ms": 1.53,
+        "mode": "deterministic",
+        "output_bytes": 352,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "nav_dev"
+    },
+    {
+      "case_id": "dev-saas-008",
+      "detector": "saas_pricing",
+      "edge_case": false,
+      "label": {
+        "meaningful": true,
+        "should_alert": true
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.3,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2627,
+        "latency_ms": 1.7,
+        "mode": "deterministic",
+        "output_bytes": 352,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "plan_added_dev"
+    },
+    {
+      "case_id": "dev-saas-009",
+      "detector": "saas_pricing",
+      "edge_case": false,
+      "label": {
+        "meaningful": true,
+        "should_alert": true
+      },
+      "predicted": {
+        "change_type": "other_meaningful",
+        "confidence": 0.5,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": true,
+        "should_alert": true
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2532,
+        "latency_ms": 1.75,
+        "mode": "deterministic",
+        "output_bytes": 467,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "addon_dev"
+    },
+    {
+      "case_id": "dev-saas-010",
+      "detector": "saas_pricing",
+      "edge_case": false,
+      "label": {
+        "meaningful": false,
+        "should_alert": false
+      },
+      "predicted": {
+        "change_type": "other_meaningful",
+        "confidence": 0.5,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": true,
+        "should_alert": true
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2527,
+        "latency_ms": 1.61,
+        "mode": "deterministic",
+        "output_bytes": 429,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "testimonial_dev"
+    },
+    {
+      "case_id": "dev-product-011",
+      "detector": "product_change",
+      "edge_case": false,
+      "label": {
+        "meaningful": true,
+        "should_alert": true
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.3,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2208,
+        "latency_ms": 1.39,
+        "mode": "deterministic",
+        "output_bytes": 356,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "feature_added_dev"
+    },
+    {
+      "case_id": "dev-product-012",
+      "detector": "product_change",
+      "edge_case": false,
+      "label": {
+        "meaningful": false,
+        "should_alert": false
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.3,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2201,
+        "latency_ms": 1.07,
+        "mode": "deterministic",
+        "output_bytes": 356,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "color_dev"
+    },
+    {
+      "case_id": "dev-product-013",
+      "detector": "product_change",
+      "edge_case": false,
+      "label": {
+        "meaningful": true,
+        "should_alert": true
+      },
+      "predicted": {
+        "change_type": "deprecation",
+        "confidence": 0.55,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": true,
+        "should_alert": true
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2253,
+        "latency_ms": 1.42,
+        "mode": "deterministic",
+        "output_bytes": 442,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "deprecation_dev"
+    },
+    {
+      "case_id": "dev-product-014",
+      "detector": "product_change",
+      "edge_case": false,
+      "label": {
+        "meaningful": false,
+        "should_alert": false
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.3,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2224,
+        "latency_ms": 1.29,
+        "mode": "deterministic",
+        "output_bytes": 371,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "cookie_dev"
+    },
+    {
+      "case_id": "dev-product-015",
+      "detector": "product_change",
+      "edge_case": false,
+      "label": {
+        "meaningful": true,
+        "should_alert": true
+      },
+      "predicted": {
+        "change_type": "none",
+        "confidence": 0.3,
+        "confidence_source": "heuristic-rule-score",
+        "meaningful": false,
+        "should_alert": false
+      },
+      "provenance": "synthetic",
+      "result_record": {
+        "error_category": "none",
+        "injected_fault": false,
+        "input_bytes": 2207,
+        "latency_ms": 1.73,
+        "mode": "deterministic",
+        "output_bytes": 356,
+        "provider": "heuristic-baseline",
+        "provider_error": null,
+        "retries": 0,
+        "schema_valid": true
+      },
+      "schema_errors": [],
+      "subtype": "integration_dev"
+    }
+  ],
+  "command": "jev-monitor benchmark --split dev --provider heuristic",
+  "config": {
+    "config_sha256": "32f1602d3885a35f9b9958c8076c9fa84a12e523d58e8faaf5d2fc93b38054b3",
+    "fault_injection_rate": 0.0,
+    "faults_injected": 0
+  },
+  "cost_model": {
+    "configured": false,
+    "path": "benchmark/cost-model.json",
+    "source": "placeholder — replace with your own contract rates before a live run"
+  },
+  "dataset": {
+    "cases_total": 15,
+    "duplicate_ids": [],
+    "edge_cases": 0,
+    "human_labeled": false,
+    "labels_complete": true,
+    "minimums": {},
+    "minimums_ok": true,
+    "path": "datasets/dev/dev-cases.jsonl",
+    "per_detector": {
+      "price": 5,
+      "product_change": 5,
+      "saas_pricing": 5
+    },
+    "provenance": {
+      "counts": {
+        "synthetic": 15
+      },
+      "missing": 0
+    },
+    "sha256": "5b7e5cbb97b09ff6c76cb0e9c027af307db1432cace834d630c52a0d6f3f20fd",
+    "split": "dev"
+  },
+  "environment": {
+    "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
+    "python": "3.12.13"
+  },
+  "evaluation_kind": "synthetic-deterministic",
+  "generated_at": "2026-09-23T14:32:54+00:00",
+  "launch_claim": {
+    "criteria_source": "replynodes/replynodes-fetcher#487",
+    "failed_checks": 6,
+    "reasons": [
+      "no authorized live Jev runtime configured for this run; semantic thresholds are unverified",
+      "deterministic-baseline numbers are pipeline evidence only and must not be presented as launch evidence",
+      "held-out labels are rubric-labeled drafts with review_status 'pending-independent-review'; independent human review/adjudication of disputed cases has not been recorded"
+    ],
+    "status": "blocked"
+  },
+  "metrics": {
+    "overall": {
+      "cases": 15,
+      "confusion_meaningful": {
+        "fn": 4,
+        "fp": 2,
+        "tn": 5,
+        "tp": 4
+      },
+      "confusion_primary": {
+        "fn": 4,
+        "fp": 2,
+        "tn": 5,
+        "tp": 4
+      },
+      "estimated_cost_available": false,
+      "estimated_inference_cost_usd": null,
+      "estimated_input_tokens": 7995,
+      "estimated_output_tokens": 1829,
+      "evaluable_cases": 15,
+      "f1": 0.5714285714285715,
+      "false_alert_rate": 0.2857142857142857,
+      "false_alerts": 2,
+      "false_change_cases": 2,
+      "false_change_rate": 0.2857142857142857,
+      "false_negative_rate": 0.5,
+      "false_negatives": 4,
+      "input_volume_bytes": 31960,
+      "label_alert_cases": 8,
+      "label_noise_cases": 7,
+      "label_unchanged_cases": 7,
+      "latency_ms_p50": 1.39,
+      "latency_ms_p95": 1.7,
+      "note": "Overall latency aggregates per-detector percentiles; per-detector values are authoritative.",
+      "output_volume_bytes": 7304,
+      "precision": 0.6666666666666666,
+      "primary_decision": "should_alert",
+      "provider_error_cases": 0,
+      "provider_error_rate": 0.0,
+      "recall": 0.5,
+      "schema_invalid_cases": 0,
+      "schema_invalid_rate": 0.0
+    },
+    "per_detector": {
+      "price": {
+        "cases": 5,
+        "confusion_meaningful": {
+          "fn": 1,
+          "fp": 1,
+          "tn": 2,
+          "tp": 1
+        },
+        "confusion_primary": {
+          "fn": 1,
+          "fp": 1,
+          "tn": 2,
+          "tp": 1
+        },
+        "estimated_cost_available": false,
+        "estimated_inference_cost_usd": null,
+        "estimated_input_tokens": 2028,
+        "estimated_output_tokens": 828,
+        "evaluable_cases": 5,
+        "exact_price_accuracy": 0.6,
+        "f1": 0.5,
+        "false_alert_rate": 0.3333333333333333,
+        "false_alerts": 1,
+        "false_change_rate": 0.3333333333333333,
+        "false_negative_rate": 0.5,
+        "false_negatives": 1,
+        "input_volume_bytes": 8103,
+        "label_alert_cases": 2,
+        "label_noise_cases": 3,
+        "label_unchanged_cases": 3,
+        "latency_ms_p50": 1.0,
+        "latency_ms_p95": 1.5219999999999998,
+        "output_volume_bytes": 3308,
+        "precision": 0.5,
+        "price_amount_accuracy": 0.6,
+        "price_cases_with_expectation": 5,
+        "price_currency_accuracy": 0.8,
+        "price_direction_accuracy": 0.6,
+        "primary_decision": "should_alert",
+        "provider_error_cases": 0,
+        "provider_error_rate": 0.0,
+        "recall": 0.5,
+        "schema_invalid_cases": 0,
+        "schema_invalid_rate": 0.0
+      },
+      "product_change": {
+        "cases": 5,
+        "confusion_meaningful": {
+          "fn": 2,
+          "fp": 0,
+          "tn": 2,
+          "tp": 1
+        },
+        "confusion_primary": {
+          "fn": 2,
+          "fp": 0,
+          "tn": 2,
+          "tp": 1
+        },
+        "estimated_cost_available": false,
+        "estimated_inference_cost_usd": null,
+        "estimated_input_tokens": 2775,
+        "estimated_output_tokens": 471,
+        "evaluable_cases": 5,
+        "f1": 0.5,
+        "false_alert_rate": 0.0,
+        "false_alerts": 0,
+        "false_change_rate": 0.0,
+        "false_negative_rate": 0.6666666666666666,
+        "false_negatives": 2,
+        "input_volume_bytes": 11093,
+        "label_alert_cases": 3,
+        "label_noise_cases": 2,
+        "label_unchanged_cases": 2,
+        "latency_ms_p50": 1.39,
+        "latency_ms_p95": 1.668,
+        "output_volume_bytes": 1881,
+        "precision": 1.0,
+        "primary_decision": "should_alert",
+        "provider_error_cases": 0,
+        "provider_error_rate": 0.0,
+        "recall": 0.3333333333333333,
+        "schema_invalid_cases": 0,
+        "schema_invalid_rate": 0.0
+      },
+      "saas_pricing": {
+        "cases": 5,
+        "confusion_meaningful": {
+          "fn": 1,
+          "fp": 1,
+          "tn": 1,
+          "tp": 2
+        },
+        "confusion_primary": {
+          "fn": 1,
+          "fp": 1,
+          "tn": 1,
+          "tp": 2
+        },
+        "estimated_cost_available": false,
+        "estimated_inference_cost_usd": null,
+        "estimated_input_tokens": 3192,
+        "estimated_output_tokens": 530,
+        "evaluable_cases": 5,
+        "f1": 0.6666666666666666,
+        "false_alert_rate": 0.5,
+        "false_alerts": 1,
+        "false_change_rate": 0.5,
+        "false_negative_rate": 0.3333333333333333,
+        "false_negatives": 1,
+        "input_volume_bytes": 12764,
+        "label_alert_cases": 3,
+        "label_noise_cases": 2,
+        "label_unchanged_cases": 2,
+        "latency_ms_p50": 1.7,
+        "latency_ms_p95": 1.742,
+        "output_volume_bytes": 2115,
+        "precision": 0.6666666666666666,
+        "primary_decision": "should_alert",
+        "provider_error_cases": 0,
+        "provider_error_rate": 0.0,
+        "recall": 0.6666666666666666,
+        "schema_invalid_cases": 0,
+        "schema_invalid_rate": 0.0
+      }
+    }
+  },
+  "provider": {
+    "endpoint_configured": false,
+    "mode": "deterministic",
+    "model": null,
+    "notes": "Local deterministic baseline. Not Jev; never launch evidence.",
+    "provider": "heuristic-baseline"
+  },
+  "run_id": "32f1602d3885a35f",
+  "threshold_evaluation": [
+    {
+      "detector": "price",
+      "max": null,
+      "metric": "exact_price_accuracy",
+      "min": 0.95,
+      "observed": 0.6,
+      "passed": false
+    },
+    {
+      "detector": "price",
+      "max": 0.02,
+      "metric": "false_change_rate",
+      "min": null,
+      "observed": 0.3333333333333333,
+      "passed": false
+    },
+    {
+      "detector": "saas_pricing",
+      "max": null,
+      "metric": "precision",
+      "min": 0.9,
+      "observed": 0.6666666666666666,
+      "passed": false
+    },
+    {
+      "detector": "saas_pricing",
+      "max": null,
+      "metric": "recall",
+      "min": 0.85,
+      "observed": 0.6666666666666666,
+      "passed": false
+    },
+    {
+      "detector": "saas_pricing",
+      "max": 0.1,
+      "metric": "false_alert_rate",
+      "min": null,
+      "observed": 0.5,
+      "passed": false
+    },
+    {
+      "detector": "product_change",
+      "max": null,
+      "metric": "precision",
+      "min": 0.9,
+      "observed": 1.0,
+      "passed": true
+    },
+    {
+      "detector": "product_change",
+      "max": null,
+      "metric": "recall",
+      "min": 0.8,
+      "observed": 0.3333333333333333,
+      "passed": false
+    },
+    {
+      "detector": "product_change",
+      "max": 0.1,
+      "metric": "false_alert_rate",
+      "min": null,
+      "observed": 0.0,
+      "passed": true
+    }
+  ],
+  "thresholds": {
+    "frozen_lock_note": "thresholds match the pre-run lock",
+    "frozen_lock_ok": true,
+    "path": "benchmark/thresholds.json",
+    "sha256": "7ccba976e24012cda11761aba8720743a2f3c01d5dafb2f545205e49338e09a0",
+    "source_issues": [
+      "replynodes/replynodes-fetcher#487"
+    ]
+  },
+  "tool": {
+    "name": "jev-change-monitor",
+    "version": "0.1.0"
+  }
+}

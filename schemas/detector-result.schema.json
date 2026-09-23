@@ -1,0 +1,72 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/replynodes/jev-change-monitor/schemas/detector-result.schema.json",
+  "title": "DetectorResult",
+  "description": "Typed detector judgement inside a common envelope. `confidence` is the raw uncalibrated probability unless a calibration is explicitly added later.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "valid",
+    "meaningful",
+    "change_type",
+    "importance",
+    "should_alert",
+    "confidence",
+    "confidence_source",
+    "summary",
+    "details",
+    "signals"
+  ],
+  "properties": {
+    "valid": { "type": "boolean" },
+    "meaningful": { "type": "boolean" },
+    "change_type": {
+      "enum": [
+        "none",
+        "price_change",
+        "price_drop",
+        "price_increase",
+        "promo_added",
+        "promo_removed",
+        "plan_price_change",
+        "period_change",
+        "currency_change",
+        "monetization_change",
+        "plan_added",
+        "plan_removed",
+        "plan_modified",
+        "limit_change",
+        "entitlement_change",
+        "addon_added",
+        "addon_removed",
+        "billing_period_change",
+        "trial_change",
+        "packaging_change",
+        "feature_added",
+        "feature_removed",
+        "deprecation",
+        "capability_change",
+        "integration_added",
+        "breaking_api_change",
+        "other_meaningful"
+      ]
+    },
+    "importance": { "enum": ["low", "medium", "high"] },
+    "should_alert": { "type": "boolean" },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "confidence_source": {
+      "enum": ["jev-raw-probability", "heuristic-rule-score", "fixture-reference"],
+      "description": "Provenance of the confidence value. A rule score is not a Jev probability."
+    },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "details": { "type": "object" },
+    "signals": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt_injection_suspected": { "type": "boolean" },
+        "truncated_input": { "type": "boolean" }
+      }
+    }
+  }
+}

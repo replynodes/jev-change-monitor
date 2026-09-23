@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/replynodes/jev-change-monitor/schemas/change-event.schema.json",
+  "title": "ChangeEvent",
+  "description": "Canonical versioned change event (replynodes/replynodes-fetcher#485). Internal tenant metadata (workspace, security fields) is never part of the public payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_version", "event_id", "event_type", "detector", "url",
+    "change_type", "importance", "meaningful", "should_alert", "summary",
+    "confidence", "detected_at", "evidence"
+  ],
+  "properties": {
+    "event_version": { "const": "1.0" },
+    "event_id": { "type": "string", "pattern": "^[0-9a-f-]{36}$" },
+    "event_type": { "const": "monitor.change.v1" },
+    "monitor_id": { "type": "string" },
+    "run_id": { "type": "string" },
+    "detector": { "enum": ["price", "saas_pricing", "product_change"] },
+    "url": { "type": "string", "minLength": 1 },
+    "change_type": { "type": "string", "minLength": 1 },
+    "importance": { "enum": ["low", "medium", "high"] },
+    "meaningful": { "type": "boolean" },
+    "should_alert": { "type": "boolean" },
+    "summary": { "type": "string", "maxLength": 1000 },
+    "confidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "source", "calibrated"],
+      "properties": {
+        "value": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "source": { "enum": ["jev-raw-probability", "heuristic-rule-score", "fixture-reference", null] },
+        "calibrated": { "type": "boolean" },
+        "calibration_note": { "type": "string" }
+      }
+    },
+    "detected_at": { "type": ["string", "null"] },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["before_sha256", "after_sha256"],
+      "properties": {
+        "before_sha256": { "type": ["string", "null"] },
+        "after_sha256": { "type": ["string", "null"] },
+        "before_captured_at": { "type": ["string", "null"] },
+        "after_captured_at": { "type": ["string", "null"] }
+      }
+    }
+  }
+}
