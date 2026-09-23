@@ -1,0 +1,53 @@
+{
+  "after": {
+    "captured_at": "2026-09-08T00:00:00Z",
+    "content": "<html><head><title>Pricing \u2014 Acme Analytics</title></head><body>\n<header><nav><a href=\"/\">Home</a><a href=\"/pricing\">Pricing</a><a href=\"/docs\">Docs</a></nav></header>\n<main>\n<h1>Acme Analytics pricing</h1>\n<section class=\"plans\">\n<h2 class=\"plan-name\">Starter</h2>\n<div class=\"price\">$39<span class=\"period\">/month</span></div>\n<ul class=\"features\"><li>Real-time dashboards</li><li>CSV export</li><li>Email support</li></ul>\n<p class=\"disclaimer\">Prices exclude taxes.</p>\n<p class=\"shipping\"><li>Free shipping on orders over $50</li></p>\n<p class=\"addon\">Add-on: Advanced reporting $15/month</p>\n</section>\n<section class=\"testimonials\"><blockquote>Acme cut our reporting time in half.</blockquote><p>Priya, operations lead</p></section>\n</main>\n<footer><p>\u00a9 2025 Acme Analytics</p></footer>\n</body></html>",
+    "content_type": "text/html"
+  },
+  "before": {
+    "captured_at": "2026-09-01T00:00:00Z",
+    "content": "<html><head><title>Pricing \u2014 Acme Analytics</title></head><body>\n<header><nav><a href=\"/\">Home</a><a href=\"/pricing\">Pricing</a><a href=\"/docs\">Docs</a></nav></header>\n<main>\n<h1>Acme Analytics pricing</h1>\n<section class=\"plans\">\n<h2 class=\"plan-name\">Starter</h2>\n<div class=\"price\">$29<span class=\"period\">/month</span></div>\n<ul class=\"features\"><li>Real-time dashboards</li><li>CSV export</li><li>Email support</li></ul>\n<p class=\"disclaimer\">Prices exclude taxes.</p>\n<p class=\"shipping\"><li>Free shipping on orders over $50</li></p>\n<p class=\"addon\">Add-on: Advanced reporting $15/month</p>\n</section>\n<section class=\"testimonials\"><blockquote>Acme cut our reporting time in half.</blockquote><p>Priya, operations lead</p></section>\n</main>\n<footer><p>\u00a9 2025 Acme Analytics</p></footer>\n</body></html>",
+    "content_type": "text/html"
+  },
+  "case_id": "held-price-002",
+  "detector": "price",
+  "edge_case": false,
+  "expected": {
+    "fixture_note": "Static fixture: authored page snapshots and labels, not real Jev output. Values are fixtures, never live model judgements.",
+    "price": {
+      "amount": 39,
+      "amount_before": 29,
+      "currency": "USD",
+      "currency_before": "USD",
+      "direction": "up",
+      "note": null,
+      "period": "month"
+    }
+  },
+  "label": {
+    "labeling": {
+      "adjudication": null,
+      "labeler": "rubric-labeled-draft (ai-author: hermes/jack-dev)",
+      "method": "single-labeler + pre-approved written rubric (docs/provenance-and-labeling.md)",
+      "notes": "Static fixture label produced against docs/provenance-and-labeling.md; independent human review/adjudication has not been recorded. Not a Jev output.",
+      "review_status": "pending-independent-review",
+      "rubric_version": "1.0"
+    },
+    "meaningful": true,
+    "rationale": "Headline monthly price rose from $29 to $39 \u2014 actionable.",
+    "should_alert": true
+  },
+  "provenance": "synthetic",
+  "provenance_detail": {
+    "authored_by": "replynodes/jev-change-monitor",
+    "kind": "synthetic",
+    "license": "Apache-2.0 (authored for this repository)",
+    "notes": "Fictional page content for 'Acme Analytics'. Not a real product, customer or page copy.",
+    "permission": "n/a \u2014 no third-party content",
+    "retrieved_at": null,
+    "source_url": null
+  },
+  "split": "held_out",
+  "subtype": "price_increase",
+  "url": "https://example.invalid/price/price_increase"
+}

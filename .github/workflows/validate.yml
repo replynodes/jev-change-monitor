@@ -1,0 +1,41 @@
+name: validate
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          pip install -e .
+      - name: Fixture determinism
+        run: python3 scripts/generate_dataset.py --check
+      - name: Full validation
+        run: jev-monitor validate
+      - name: Redaction integrity + rubric citations
+        run: jev-monitor redact-check
+      - name: Deterministic benchmark (held-out, ephemeral output)
+        # Writes to the gitignored results/runs/ dir. Committed artifacts
+        # under results/committed/ stay read-only; repro-check below compares
+        # against the untouched committed blob.
+        run: jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
+      - name: Fault-injection benchmark (ephemeral output)
+        run: jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09 --out results/runs/held_out-deterministic-fault-injection.json
+      - name: Reproducibility check (against committed artifacts)
+        run: jev-monitor repro-check --split held_out
+      - name: Committed artifacts stay read-only (worktree clean)
+        run: test -z "$(git status --porcelain)" || { echo "worktree has changes:"; git status --porcelain; exit 1; }
+      - name: Webhook contract roundtrip
+        run: jev-monitor webhook-demo
+      - name: Secret scan
+        run: bash scripts/secret_scan.sh
+      - name: Whitespace hygiene
+        run: git diff --check

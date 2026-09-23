@@ -1,0 +1,45 @@
+{
+  "thresholds_version": "1.0",
+  "frozen": true,
+  "source_issues": [
+    "replynodes/replynodes-fetcher#487"
+  ],
+  "frozen_policy": "These thresholds were committed before any held-out evaluation. Editing them after a held-out run invalidates that run and requires an explicit issue update (replynodes/replynodes-fetcher#487) before the next held-out run. benchmark/thresholds.lock.json records the committed SHA-256.",
+  "evaluation_policy": {
+    "primary_decision": "should_alert",
+    "notes": [
+      "precision/recall/f1/false_alert_rate/false_negative_rate use the actionable alert decision against the human label.",
+      "false_change_rate (price) counts predicted meaningful changes on label-unchanged cases (price false-change gate).",
+      "exact_price_accuracy requires amount AND currency AND direction to match the label.",
+      "Only a live Jev evaluation can satisfy these gates; deterministic-baseline runs are pipeline evidence."
+    ]
+  },
+  "detectors": {
+    "price": {
+      "metrics": {
+        "exact_price_accuracy": {
+          "min": 0.95,
+          "description": "exact amount + currency + direction accuracy"
+        },
+        "false_change_rate": {
+          "max": 0.02,
+          "description": "false-change rate on unchanged price cases"
+        }
+      }
+    },
+    "saas_pricing": {
+      "metrics": {
+        "precision": { "min": 0.9 },
+        "recall": { "min": 0.85 },
+        "false_alert_rate": { "max": 0.1 }
+      }
+    },
+    "product_change": {
+      "metrics": {
+        "precision": { "min": 0.9 },
+        "recall": { "min": 0.8 },
+        "false_alert_rate": { "max": 0.1 }
+      }
+    }
+  }
+}

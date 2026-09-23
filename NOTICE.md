@@ -17,7 +17,9 @@ docs/boundary.md).
 ## Fixture provenance
 
 - All synthetic page content is authored for this repository; the fictional
-  product "Acme Analytics" does not describe a real product or customer.
+  products "Acme Analytics" (held-out) and "Bluepeak Analytics" (dev/tuning)
+  do not describe real products or customers, and the two splits share no page
+  content.
 - Derived fixtures cite their public source page (observed HTTP 200 on
   2026-09-23) and derive only structural patterns; no page copy, prices,
   product names or proprietary content is redistributed.

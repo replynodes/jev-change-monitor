@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/replynodes/jev-change-monitor/schemas/benchmark-result.schema.json",
+  "title": "BenchmarkResult",
+  "description": "Machine-readable benchmark result artifact. It records which kind of evaluation produced it so deterministic baselines can never be read as live Jev evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_version", "run_id", "generated_at", "tool", "provider",
+    "evaluation_kind", "command", "dataset", "thresholds", "cost_model",
+    "environment", "config", "metrics", "threshold_evaluation", "launch_claim",
+    "cases", "artifact_sha256"
+  ],
+  "properties": {
+    "artifact_version": { "const": "1.0.0" },
+    "run_id": { "type": ["string", "null"] },
+    "generated_at": { "type": "string" },
+    "tool": {
+      "type": "object",
+      "required": ["name", "version"],
+      "properties": { "name": { "type": "string" }, "version": { "type": "string" } }
+    },
+    "provider": {
+      "type": "object",
+      "required": ["provider", "mode"],
+      "properties": {
+        "provider": { "type": "string" },
+        "mode": { "enum": ["deterministic", "live"] },
+        "model": { "type": ["string", "null"] },
+        "endpoint_configured": { "type": ["string", "boolean"] },
+        "api_key_configured": { "type": ["string", "boolean"] },
+        "command_configured": { "type": ["string", "boolean"] },
+        "command_label": { "type": ["string", "null"] },
+        "timeout_s": { "type": "number" },
+        "retries": { "type": "integer", "minimum": 0 },
+        "notes": { "type": "string" }
+      }
+    },
+    "evaluation_kind": { "enum": ["synthetic-deterministic", "live-jev", "live-jev-blocked"] },
+    "command": { "type": "string" },
+    "dataset": {
+      "type": "object",
+      "required": ["split", "path", "sha256", "cases_total", "per_detector",
+                   "edge_cases", "duplicate_ids", "human_labeled"],
+      "properties": {
+        "split": { "enum": ["held_out", "dev"] },
+        "path": { "type": "string" },
+        "sha256": { "type": "string" },
+        "cases_total": { "type": "integer", "minimum": 0 },
+        "per_detector": { "type": "object" },
+        "edge_cases": { "type": "integer", "minimum": 0 },
+        "duplicate_ids": { "type": "array" },
+        "human_labeled": { "type": "boolean" }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "required": ["path", "sha256", "frozen_lock_ok"],
+      "properties": {
+        "path": { "type": "string" },
+        "sha256": { "type": "string" },
+        "frozen_lock_ok": { "type": "boolean" }
+      }
+    },
+    "cost_model": { "type": "object" },
+    "environment": { "type": "object" },
+    "config": { "type": "object" },
+    "metrics": {
+      "type": "object",
+      "required": ["overall", "per_detector"],
+      "properties": {
+        "overall": { "$ref": "#/definitions/metricBlock" },
+        "per_detector": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/definitions/metricBlock" }
+        }
+      }
+    },
+    "threshold_evaluation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["detector", "metric", "observed", "passed"],
+        "properties": {
+          "detector": { "type": "string" },
+          "metric": { "type": "string" },
+          "min": { "type": ["number", "null"] },
+          "max": { "type": ["number", "null"] },
+          "observed": { "type": ["number", "null"] },
+          "passed": { "type": "boolean" }
+        }
+      }
+    },
+    "launch_claim": {
+      "type": "object",
+      "required": ["status", "reasons", "failed_checks", "criteria_source"],
+      "properties": {
+        "status": { "enum": ["blocked", "failed", "passed"] },
+        "reasons": { "type": "array", "items": { "type": "string" } },
+        "failed_checks": { "type": "integer", "minimum": 0 },
+        "criteria_source": { "type": "string" }
+      }
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["case_id", "detector", "label", "predicted", "result_record"],
+        "properties": {
+          "case_id": { "type": "string" },
+          "detector": { "type": "string" },
+          "label": { "type": "object" },
+          "predicted": { "type": "object" },
+          "result_record": {
+            "type": "object",
+            "required": ["provider", "mode", "schema_valid", "error_category",
+                         "latency_ms", "input_bytes", "output_bytes"],
+            "properties": {
+              "provider": { "type": "string" },
+              "mode": { "type": "string" },
+              "schema_valid": { "type": "boolean" },
+              "error_category": { "type": "string" },
+              "provider_error": { "type": ["string", "null"] },
+              "latency_ms": { "type": "number", "minimum": 0 },
+              "input_bytes": { "type": "integer", "minimum": 0 },
+              "output_bytes": { "type": "integer", "minimum": 0 },
+              "retries": { "type": "integer", "minimum": 0 },
+              "injected_fault": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    },
+    "artifact_sha256": { "type": ["string", "null"] }
+  },
+  "definitions": {
+    "metricBlock": {
+      "type": "object",
+      "required": ["cases", "precision", "recall", "f1", "false_alert_rate",
+                   "false_negative_rate", "false_change_rate", "schema_invalid_rate",
+                   "provider_error_rate"],
+      "properties": {
+        "cases": { "type": "integer", "minimum": 0 },
+        "precision": { "type": ["number", "null"] },
+        "recall": { "type": ["number", "null"] },
+        "f1": { "type": ["number", "null"] },
+        "false_alert_rate": { "type": ["number", "null"] },
+        "false_negative_rate": { "type": ["number", "null"] },
+        "false_change_rate": { "type": ["number", "null"] },
+        "schema_invalid_rate": { "type": ["number", "null"] },
+        "provider_error_rate": { "type": ["number", "null"] }
+      }
+    }
+  }
+}

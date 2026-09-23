@@ -1,0 +1,32 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/replynodes/jev-change-monitor/schemas/detector-request.schema.json",
+  "title": "DetectorRequest",
+  "description": "Normalized before/after evidence submitted to a detector provider. Page content is untrusted input.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "detector", "url", "before", "after"],
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "request_id": { "type": "string", "minLength": 1 },
+    "detector": { "enum": ["price", "saas_pricing", "product_change"] },
+    "url": { "type": "string", "minLength": 1 },
+    "detected_at": { "type": ["string", "null"] },
+    "before": { "$ref": "#/definitions/snapshot" },
+    "after": { "$ref": "#/definitions/snapshot" }
+  },
+  "definitions": {
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["content_type", "content", "sha256", "captured_at", "byte_count"],
+      "properties": {
+        "content_type": { "enum": ["text/normalized", "text/html", "text/markdown", "text/plain"] },
+        "content": { "type": "string", "maxLength": 200000 },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "captured_at": { "type": "string", "minLength": 1 },
+        "byte_count": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

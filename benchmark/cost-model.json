@@ -1,0 +1,9 @@
+{
+  "unit": "USD",
+  "configured": false,
+  "input_per_million_tokens": 0.0,
+  "output_per_million_tokens": 0.0,
+  "source": "placeholder — replace with your own contract rates before a live run",
+  "note": "This repository does not publish Jev or gateway pricing. While `configured` is false the benchmark reports measured token estimates and estimated_inference_cost_usd = null rather than inventing a price. Set `configured: true` and your own rates to get a cost estimate.",
+  "token_estimate_method": "ceil(bytes / 4) for input and output; a coarse estimator, not a tokenizer"
+}
