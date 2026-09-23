@@ -14,7 +14,11 @@ Redaction is **field-aware**:
   digest.
 - Everywhere else, only specific, known credential shapes are redacted
   (`sk-...`, `gh[pousr]_...`, `rn_live_/rn_test_...`, AWS-style `AKIA...`
-  and `Bearer <token>`). A broad catch-all such as "any 21+ alphanumeric
+  and `Bearer <token>`). Redaction removes the secret-bearing portion
+  entirely: only a non-secret prefix plus the `[REDACTED]` placeholder
+  survives (`sk-[REDACTED]`, `ghp_[REDACTED]`, `rn_live_[REDACTED]`,
+  `AKIA[REDACTED]`, `Bearer [REDACTED]`). The full token text is never
+  preserved in output. A broad catch-all such as "any 21+ alphanumeric
   token starting with e/ei" is deliberately NOT used: it corrupted valid
   e-prefixed SHA-256 digests while adding no real coverage beyond the
   explicit patterns.
@@ -25,11 +29,14 @@ only allowed signal is a boolean "configured / not configured" flag.
 
 import re
 
+# Each pattern captures ONLY the non-secret prefix in group 1; the secret
+# token itself is matched but never captured, so substitution keeps the
+# prefix and drops the token entirely (e.g. `sk-[REDACTED]`).
 _PATTERNS = [
-    re.compile(r"\b(sk-[A-Za-z0-9_\-]{8,})\b"),          # OpenAI-style
-    re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{20,})\b"),      # GitHub tokens
-    re.compile(r"\b(rn_(live|test)_[A-Za-z0-9]{16,})\b"), # ReplyNodes API keys
-    re.compile(r"\b(ak?ia[0-9A-Za-z]{16,})\b", re.IGNORECASE),  # AWS-style (AKIA... keys are uppercase)
+    re.compile(r"\b(sk-)[A-Za-z0-9_\-]{8,}\b"),            # OpenAI-style
+    re.compile(r"\b(gh[pousr]_)[A-Za-z0-9]{20,}\b"),        # GitHub tokens
+    re.compile(r"\b(rn_(?:live|test)_)[A-Za-z0-9]{16,}\b"), # ReplyNodes API keys
+    re.compile(r"\b(ak?ia)[0-9A-Za-z]{16,}\b", re.IGNORECASE),  # AWS-style (AKIA... keys are uppercase)
     re.compile(r"\b(Bearer\s+)[A-Za-z0-9._\-]{12,}\b", re.IGNORECASE),
 ]
 
@@ -47,7 +54,7 @@ def is_hash_field(key) -> bool:
 def redact_string(value: str) -> str:
     out = value
     for pat in _PATTERNS:
-        out = pat.sub(lambda m: f"{m.group(1)}{_PLACEHOLDER}" if m.lastindex else _PLACEHOLDER, out)
+        out = pat.sub(lambda m: f"{m.group(1)}{_PLACEHOLDER}", out)
     return out
 
 

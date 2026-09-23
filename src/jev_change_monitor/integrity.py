@@ -6,8 +6,10 @@ These are integration/repro checks over the *committed* tree, not unit tests:
    shapes *and* valid SHA-256 digests (including e-prefixed ones, which the
    old over-broad pattern corrupted) is pushed through `redact.redact_value`.
    Every hash field must survive byte-exact and render as a valid 64-hex
-   digest; every secret-shaped value must contain the literal `[REDACTED]`
-   placeholder; non-secret plain text must be untouched.
+   digest; every secret-shaped value must have its FULL token absent from the
+   output — only the safe, non-secret prefix plus the literal `[REDACTED]`
+   placeholder may survive (e.g. `sk-[REDACTED]`, `AKIA[REDACTED]`,
+   `Bearer [REDACTED]`); non-secret plain text must be untouched.
 2. Committed benchmark artifacts — every hash-labeled field (`*sha256*`,
    `*hash*`, `*digest*`, `*checksum*`) must be null or a valid 64-hex digest,
    the artifact self-hash must recompute to the recorded `artifact_sha256`,
@@ -69,15 +71,17 @@ HASH_64_ARTIFACT = "e0" * 32
 _OPENAI_SHAPE = "sk-" + "abcdefghijklmn1234567890abcdefgh"
 _GITHUB_SHAPE = "ghp_" + "abcdefghijklmnopqrstuvwxyz123456"
 _RN_LIVE_SHAPE = "rn_live_" + "abcdefghijklmnopqrstuv"
-_AWS_SHAPE = "AKIA" + "IOSFODNN7EXAMPLE12345"
 _RN_TEST_SHAPE = "rn_test_" + "abcdefghijklmnopqrstuv"
+_AWS_SHAPE = "AKIA" + "IOSFODNN7EXAMPLE12345"
+_BEARER_TOKEN = "abcdefghijklmnopqrstuvwxyz0123456789"
+_BEARER_SHAPE = "Authorization: Bearer " + _BEARER_TOKEN
 
 REDACTION_PROBE = {
     "secret": _OPENAI_SHAPE,
     "token": _GITHUB_SHAPE,
     "api_key": _RN_LIVE_SHAPE,
     "aws": _AWS_SHAPE,
-    "bearer": "Authorization: Bearer abcdefghijklmnop123456",
+    "bearer": _BEARER_SHAPE,
     "plain": "hello world",
     "run_id": "e50bfb663d600bad",
     "config_sha256": HASH_64_E,
@@ -92,6 +96,16 @@ REDACTION_PROBE = {
 }
 
 SECRET_KEYS = ("secret", "token", "api_key", "aws", "bearer")
+# Exact safe output for every secret-shaped probe entry: the FULL token must
+# be gone and only the non-secret prefix plus `[REDACTED]` may remain.
+SECRET_EXPECTATIONS = {
+    "secret": "sk-[REDACTED]",
+    "token": "ghp_[REDACTED]",
+    "api_key": "rn_live_[REDACTED]",
+    "aws": "AKIA[REDACTED]",
+    "bearer": "Authorization: Bearer [REDACTED]",
+}
+HISTORY_NOTE_EXPECTATIONS = ("sk-[REDACTED]", "rn_test_[REDACTED]")
 HASH_PROBE_KEYS = ("config_sha256", "artifact_sha256", "digest_list")
 HASH_PROBE_PATH_SEGMENTS = (
     ("dataset", "sha256"),
@@ -107,13 +121,22 @@ HASH_PROBE_PATH_SEGMENTS = (
 _CMD_POISON_BIN1 = "/opt/evil/runner_2026 --token sk-" + "abcdef0123456789abcdef0123456789ab"
 _CMD_POISON_BIN2 = "/usr/bin/tool --api-key rn_live_" + "abcdef0123456789abcdef0123"
 _CMD_POISON_BIN3 = "/tmp/no-such-binary --flag ghp_" + "abcdefghijklmnopqrstuvwxyz123456"
+_CMD_POISON_BIN4 = "/opt/evil/aws_tool --access AKIA" + "IOSFODNN7EXAMPLE12345"
+_CMD_POISON_BIN5 = "/opt/evil/http_tool --auth Bearer " + "abcdefghijklmnopqrstuvwxyz0123456789"
 _CMD_POISON_EXE = "sk-" + "abcdefghijklmn1234567890abcdefgh"
-_CMD_POISONS = [_CMD_POISON_BIN1, _CMD_POISON_BIN2, _CMD_POISON_BIN3, _CMD_POISON_EXE]
+_CMD_POISON_AKIA_EXE = "AKIA" + "IOSFODNN7EXAMPLE12345"
+_CMD_POISONS = [
+    _CMD_POISON_BIN1, _CMD_POISON_BIN2, _CMD_POISON_BIN3, _CMD_POISON_BIN4,
+    _CMD_POISON_BIN5, _CMD_POISON_EXE, _CMD_POISON_AKIA_EXE,
+]
 _CMD_CREDENTIALS = [
     "sk-" + "abcdef0123456789abcdef0123456789ab",
     "rn_live_" + "abcdef0123456789abcdef0123",
     "ghp_" + "abcdefghijklmnopqrstuvwxyz123456",
     "sk-" + "abcdefghijklmn1234567890abcdefgh",
+    "rn_test_" + "abcdef0123456789abcdef0123",
+    "AKIA" + "IOSFODNN7EXAMPLE12345",
+    "Bearer " + "abcdefghijklmnopqrstuvwxyz0123456789",
 ]
 _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
@@ -126,12 +149,15 @@ _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 # would appear in describe()/provider_error and fail the gate.
 _HTTP_SK_TOKEN = "sk-" + "abcdef0123456789abcdef0123456789ab"
 _HTTP_RN_TOKEN = "rn_live_" + "abcdef0123456789abcdef0123"
+_HTTP_AKIA_TOKEN = "AKIA" + "IOSFODNN7EXAMPLE12345"
 _HTTP_ENDPOINT_POISON = (
     "http://127.0.0.1:1/chat/completions?token=" + _HTTP_SK_TOKEN
     + "&key=" + _HTTP_RN_TOKEN
+    + "&aws=" + _HTTP_AKIA_TOKEN
 )
 _HTTP_API_KEY_POISON = _HTTP_SK_TOKEN
 _HTTP_ENDPOINT_FRAGMENTS = ("http://", "127.0.0.1", "/chat/completions")
+_HTTP_BEARER_HEADER_SHAPE = "Bearer " + _HTTP_SK_TOKEN
 
 
 def _iter_hash_strings(node, key=None, path=()):
@@ -169,11 +195,29 @@ def redaction_probe() -> list[str]:
             problems.append("probe: nested config_sha256 was altered by redaction")
 
     for key in SECRET_KEYS:
-        if "[REDACTED]" not in result[key]:
+        original = REDACTION_PROBE[key]
+        value = result[key]
+        if original in value:
+            problems.append(f"probe: full secret-shaped value under {key!r} STILL PRESENT after redaction")
+        if "[REDACTED]" not in value:
             problems.append(f"probe: secret-shaped value under {key!r} was NOT redacted")
+        if value != SECRET_EXPECTATIONS[key]:
+            problems.append(
+                f"probe: secret-shaped value under {key!r} does not match the safe "
+                f"form {SECRET_EXPECTATIONS[key]!r}: got {value!r}"
+            )
     for index, entry in enumerate(result["history"]):
-        if "[REDACTED]" not in entry.get("note", ""):
+        original = REDACTION_PROBE["history"][index].get("note", "")
+        note = entry.get("note", "")
+        if original in note:
+            problems.append(f"probe: full secret token still present in nested history[{index}]")
+        if "[REDACTED]" not in note:
             problems.append(f"probe: secret-shaped value in nested history[{index}] was NOT redacted")
+        if note != HISTORY_NOTE_EXPECTATIONS[index]:
+            problems.append(
+                f"probe: nested history[{index}] note does not match the safe form "
+                f"{HISTORY_NOTE_EXPECTATIONS[index]!r}: got {note!r}"
+            )
     if result["plain"] != "hello world":
         problems.append("probe: plain non-secret text was altered by redaction")
     if result["run_id"] != "e50bfb663d600bad":
@@ -296,7 +340,7 @@ def command_value_probe() -> list[str]:
             label = describe.get("command_label")
             if not label_ok(label):
                 problems.append(f"command probe: unsafe command_label {label!r}")
-            if poison.startswith("sk-") and label is not None:
+            if poison.startswith(("sk-", "AKIA")) and label is not None:
                 problems.append("command probe: credential-shaped executable leaked as label")
 
         # Full-artifact inspection: run the benchmark with the first poison so
@@ -361,7 +405,9 @@ def http_provider_probe() -> list[str]:
     from jev_change_monitor.providers.jev_http import JevHttpProvider
 
     problems: list[str] = []
-    tokens = (_HTTP_ENDPOINT_POISON, _HTTP_API_KEY_POISON)
+    tokens = (_HTTP_ENDPOINT_POISON, _HTTP_API_KEY_POISON,
+              _HTTP_SK_TOKEN, _HTTP_RN_TOKEN, _HTTP_AKIA_TOKEN,
+              _HTTP_BEARER_HEADER_SHAPE)
 
     original = {name: os.environ.get(name)
                 for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL")}

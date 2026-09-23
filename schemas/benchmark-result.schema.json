@@ -36,7 +36,7 @@
         "notes": { "type": "string" }
       }
     },
-    "evaluation_kind": { "enum": ["synthetic-deterministic", "live-jev"] },
+    "evaluation_kind": { "enum": ["synthetic-deterministic", "live-jev", "live-jev-blocked"] },
     "command": { "type": "string" },
     "dataset": {
       "type": "object",

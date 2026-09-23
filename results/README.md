@@ -9,7 +9,7 @@ committed and validated against
 | `heuristic-baseline/held_out-deterministic.json` | held-out run with the local rule baseline, 111 cases | `synthetic-deterministic` |
 | `heuristic-baseline/dev-deterministic.json` | dev/tuning split run, 15 cases | `synthetic-deterministic` |
 | `heuristic-baseline/held_out-deterministic-fault-injection.json` | held-out run with labeled fault injection (9%) to exercise error-rate metrics only | `synthetic-deterministic` |
-| `blocked/live-jev-blocked.json` | machine-readable BLOCKED result for the live Jev path | `live-jev` (blocked) |
+| `blocked/live-jev-blocked.json` | machine-readable BLOCKED result for the live Jev path | `live-jev-blocked` |
 
 ## Reproducing
 

@@ -1,0 +1,26 @@
+# Docker build context hygiene — keep the image small and never bake local
+# scratch or credentials into it.
+#
+# `results/committed/` stays in the context (the image must validate the
+# committed artifacts), but gitignored run-local output, VCS metadata and
+# caches are excluded so a local build cannot embed stray runs or scratch.
+
+.git/
+results/runs/
+scratch/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+*.log
+*.tmp
+.DS_Store
+.idea/
+.vscode/
+.env
+.env.*
+!.env.example

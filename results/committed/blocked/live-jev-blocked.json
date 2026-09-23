@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "2f64bf6d04d542a014f2fa696d9eb10d352a82fde254a083db75c85dfebbdfce",
+  "artifact_sha256": "98b81acf0b807508c5fe9edb0ba48345e3ae6df14f6e890a6ab8614f9252ecb6",
   "artifact_version": "1.0.0",
   "cases": [],
   "command": "jev-monitor blocked-live",
@@ -32,8 +32,8 @@
     "platform": "Linux-6.8.0-124-generic-x86_64-with-glibc2.39",
     "python": "3.12.13"
   },
-  "evaluation_kind": "live-jev",
-  "generated_at": "2026-09-23T15:44:00+00:00",
+  "evaluation_kind": "live-jev-blocked",
+  "generated_at": "2026-09-23T17:45:31+00:00",
   "launch_claim": {
     "criteria_source": "replynodes/replynodes-fetcher#487",
     "failed_checks": 8,

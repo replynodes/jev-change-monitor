@@ -88,8 +88,12 @@ artifact and refuses `PASS` while any launch blocker (missing live Jev run,
 pending independent label review, non-empty reasons) is recorded.
 
 `jev-monitor redact-check` proves in one deterministic pass that recorded
-SHA-256 fields stay byte-exact (never corrupted by redaction), secret-shaped
-values are still replaced, every fixture cites the existing rubric at
+SHA-256 fields stay byte-exact (never corrupted by redaction), that the FULL
+secret token is removed from every secret-shaped value — each credential
+family (`sk-`, `ghp_`/`gho_`/`ghu_`/`ghs_`/`ghr_`, `rn_live_`, `rn_test_`,
+`AKIA`, `Bearer`) is replaced by its safe non-secret prefix plus `[REDACTED]`
+(e.g. `sk-[REDACTED]`, `AKIA[REDACTED]`), so the original token text never
+survives in output or artifacts — every fixture cites the existing rubric at
 `docs/provenance-and-labeling.md`, and a poisoned `JEV_COMMAND` (arbitrary
 command text plus credential-shaped tokens) never reaches
 `provider.describe()` or any result artifact — only a configured flag and an

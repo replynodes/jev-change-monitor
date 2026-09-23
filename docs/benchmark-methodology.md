@@ -102,9 +102,15 @@ artifact.
 
 - `synthetic-deterministic` — rule baseline; pipeline evidence only; never
   launch evidence.
-- `live-jev` — only this kind can pass the gates. Requires authorized
-  credentials via environment variables; raw result provenance is preserved in
-  the artifact.
+- `live-jev` — a real, configured live Jev runtime ran. Only this kind can
+  pass the gates. Requires authorized credentials via environment variables;
+  raw result provenance is preserved in the artifact.
+- `live-jev-blocked` — the dedicated machine-readable BLOCKED artifact written
+  when no authorized live Jev runtime is available: zero metrics, an
+  unverified threshold evaluation, and `launch_claim.status = "blocked"`. It
+  is deliberately distinct from `live-jev` so a downstream reader keying on
+  `evaluation_kind` alone can never mistake a blocked artifact for live
+  evidence.
 
 `launch_claim.status` is `passed` **only** for a live-jev run with all checks
 green **and** `dataset.human_labeled == true` (every held-out label carries
@@ -120,9 +126,12 @@ green. Nothing in this repository claims the launch thresholds passed.
 `jev-monitor redact-check` (also run inside `validate`) proves, over a fixed
 probe and every committed artifact, that recorded SHA-256/hash fields survive
 byte-exact and render as valid 64-hex digests (including e-prefixed hashes),
-that secret-shaped values are still replaced with `[REDACTED]`, that
-`config.config_sha256` recomputes from the artifact, and that all rubric
-citations resolve to `docs/provenance-and-labeling.md`.
+that every secret-shaped value has its FULL token removed — only the safe
+non-secret prefix plus `[REDACTED]` survives (e.g. `sk-[REDACTED]`,
+`AKIA[REDACTED]`, `Bearer [REDACTED]`), so the original credential text is
+absent from the output — that `config.config_sha256` recomputes from the
+artifact, and that all rubric citations resolve to
+`docs/provenance-and-labeling.md`.
 
 ## Docker
 

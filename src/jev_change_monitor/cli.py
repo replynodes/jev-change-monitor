@@ -162,8 +162,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
         print(f"  FAIL {problem}")
     problems.extend(f"redact-check: {p}" for p in integrity_problems)
     if not integrity_problems:
-        print("  ok  hash fields byte-exact; secret-shaped values redacted; rubric paths "
-              "resolve; JEV_COMMAND values and JEV_HTTP endpoint detail never persist")
+        print("  ok  hash fields byte-exact; full secret tokens absent (safe prefix + "
+              "[REDACTED] only); rubric paths resolve; JEV_COMMAND values and JEV_HTTP "
+              "endpoint detail never persist")
 
     if problems:
         print("\n".join(f"  - {p}" for p in problems))
@@ -203,10 +204,13 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         return _fail(f"cannot write {display_path(out)}: {exc}")
     print(json.dumps({
         "evaluation_kind": artifact["evaluation_kind"],
-        "evaluation_kind_note": (
-            "synthetic-deterministic runs use the local rule baseline and are NOT Jev results"
-            if artifact["evaluation_kind"] != "live-jev" else "live Jev provider"
-        ),
+        "evaluation_kind_note": {
+            "synthetic-deterministic": "synthetic-deterministic runs use the local rule "
+                                       "baseline and are NOT Jev results",
+            "live-jev": "live Jev provider",
+            "live-jev-blocked": "blocked: no authorized live Jev runtime was available; "
+                                "zero metrics recorded",
+        }.get(artifact["evaluation_kind"], artifact["evaluation_kind"]),
         "provider": artifact["provider"]["provider"],
         "cases": artifact["dataset"]["cases_total"],
         "per_detector": artifact["dataset"]["per_detector"],
@@ -302,8 +306,9 @@ def cmd_redact_check(args: argparse.Namespace) -> int:
         for problem in problems:
             print(f"FAIL: {problem}")
         return _fail(f"{len(problems)} integrity problem(s)")
-    print("redact-check: PASS (hash fields byte-exact; secret-shaped values redacted; "
-          "rubric paths resolve; JEV_COMMAND values and JEV_HTTP endpoint detail never persist)")
+    print("redact-check: PASS (hash fields byte-exact; full secret tokens absent — safe "
+          "prefix + [REDACTED] only; rubric paths resolve; JEV_COMMAND values and "
+          "JEV_HTTP endpoint detail never persist)")
     return 0
 
 
@@ -483,7 +488,7 @@ def cmd_blocked_live(args: argparse.Namespace) -> int:
             "command_configured": providers[1].describe()["command_configured"],
             "notes": "No authorized Jev runtime was available when this artifact was written.",
         },
-        "evaluation_kind": "live-jev",
+        "evaluation_kind": "live-jev-blocked",
         "command": " ".join(["jev-monitor", "blocked-live", *sys.argv[2:]]),
         "dataset": {
             "split": "held_out",
