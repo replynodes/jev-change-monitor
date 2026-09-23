@@ -9,6 +9,11 @@ Configuration (environment only, never read from files):
 The repository cannot fabricate live Jev results. When `JEV_ENDPOINT` is
 unset, this provider reports itself as not-configured and the benchmark emits
 a machine-readable BLOCKED result for semantic thresholds.
+
+Error discipline matches `jev-command`: failure messages never echo exception
+detail, the endpoint URL, or response fragments. Only bounded, fixed error
+categories are recorded (HTTP status codes and withheld-detail type names), so
+the configured endpoint can never reach a result artifact.
 """
 
 from __future__ import annotations
@@ -101,11 +106,17 @@ class JevHttpProvider:
                            **evidence_meta},
                 )
             except urllib.error.HTTPError as exc:
+                # Bounded: status code only; never the URL or response body.
                 last_error = f"HTTP {exc.code}"
-            except urllib.error.URLError as exc:
-                last_error = f"URLError: {exc.reason}"
-            except Exception as exc:  # noqa: BLE001
-                last_error = f"{type(exc).__name__}: {exc}"
+            except urllib.error.URLError:
+                # `reason` can echo the configured JEV_ENDPOINT (connection /
+                # TLS failure messages include the host), so detail is withheld
+                # exactly like jev_command withholds command/argv detail.
+                last_error = "URLError (details withheld)"
+            except Exception as exc:  # noqa: BLE001 - normalize provider failure
+                # json/decode/read failures can embed URL or body fragments;
+                # the exception detail is withheld.
+                last_error = f"{type(exc).__name__} (details withheld)"
         body_bytes = len(body)
         return ProviderResponse(
             provider=self.name, mode=self.mode, result=None, raw=None,

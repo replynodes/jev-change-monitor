@@ -62,7 +62,9 @@ accepted spec) in `"source_issues"`.
 pip install -e .
 python3 scripts/generate_dataset.py --check
 jev-monitor validate
-jev-monitor benchmark --split held_out --provider heuristic
+# Run-local output only: results/runs/ is gitignored, so PR verification never
+# overwrites the committed artifacts under results/committed/.
+jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
 jev-monitor repro-check --split held_out
 bash scripts/secret_scan.sh
 git diff --check

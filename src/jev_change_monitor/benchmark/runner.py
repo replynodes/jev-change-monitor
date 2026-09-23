@@ -110,6 +110,15 @@ def run(
     for index, case in enumerate(cases):
         detector = get_detector(case["detector"])
         request = _request_for_case(case)
+        # The request is constructed repo-side from committed fixtures; it must
+        # conform to the canonical detector-request contract. A violation is a
+        # repository bug, so the run fails loudly instead of recording it.
+        request_errors = validate_schema(request, "detector-request")
+        if request_errors:
+            raise ValueError(
+                f"case {case['case_id']!r}: constructed detector request violates "
+                f"schemas/detector-request.schema.json: {'; '.join(request_errors)}"
+            )
         fault = injector.should_fault(index)
         if fault == "provider_error":
             response = ProviderResponse(

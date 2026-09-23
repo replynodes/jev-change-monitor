@@ -77,6 +77,33 @@ def cmd_validate(args: argparse.Namespace) -> int:
         cases = dataset.load_cases(split, validate=True)
         print(f"  {split}: {len(cases)} cases schema-valid")
 
+    print("== constructed requests and change events conform to committed schemas ==")
+    from jev_change_monitor.events import build_change_event
+
+    heuristic_provider = get_provider("heuristic")
+    constructed = {"requests": 0, "events": 0}
+    for split in ("held_out", "dev"):
+        for case in dataset.load_cases(split, validate=False):
+            request = runner._request_for_case(case)  # noqa: SLF001 - shared request builder
+            request_errors = validate_schema(request, "detector-request")
+            if request_errors:
+                problems.append(f"{split}/{case['case_id']}: detector request "
+                                f"schema-invalid: {'; '.join(request_errors)}")
+            constructed["requests"] += 1
+            response = heuristic_provider.judge(get_detector(case["detector"]), request)
+            if response.result is not None and response.schema_valid:
+                event = build_change_event(response.result, request,
+                                           {"case_id": case["case_id"]})
+                event_errors = validate_schema(event, "change-event")
+                if event_errors:
+                    problems.append(f"{split}/{case['case_id']}: change event "
+                                    f"schema-invalid: {'; '.join(event_errors)}")
+                constructed["events"] += 1
+    print(f"  requests checked: {constructed['requests']}, events checked: "
+          f"{constructed['events']}")
+    if constructed["events"] == 0:
+        problems.append("no change events could be constructed for schema checks")
+
     print("== split separation (held_out vs dev content, #487) ==")
     try:
         overlaps = dataset.cross_split_content_overlap()
@@ -136,7 +163,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     problems.extend(f"redact-check: {p}" for p in integrity_problems)
     if not integrity_problems:
         print("  ok  hash fields byte-exact; secret-shaped values redacted; rubric paths "
-              "resolve; JEV_COMMAND values never persist")
+              "resolve; JEV_COMMAND values and JEV_HTTP endpoint detail never persist")
 
     if problems:
         print("\n".join(f"  - {p}" for p in problems))
@@ -276,7 +303,7 @@ def cmd_redact_check(args: argparse.Namespace) -> int:
             print(f"FAIL: {problem}")
         return _fail(f"{len(problems)} integrity problem(s)")
     print("redact-check: PASS (hash fields byte-exact; secret-shaped values redacted; "
-          "rubric paths resolve; JEV_COMMAND values never persist)")
+          "rubric paths resolve; JEV_COMMAND values and JEV_HTTP endpoint detail never persist)")
     return 0
 
 
@@ -300,6 +327,10 @@ def cmd_demo(args: argparse.Namespace) -> int:
                           "result": result}, indent=2, sort_keys=True))
         if result and response.schema_valid:
             event = build_change_event(result, request, {"case_id": case["case_id"]})
+            event_errors = validate_schema(event, "change-event")
+            if event_errors:
+                return _fail(f"{case_path}: change event schema-invalid: "
+                             f"{'; '.join(event_errors)}")
             print("canonical event:")
             print(json.dumps(event, indent=2, sort_keys=True))
     return 0
@@ -320,6 +351,9 @@ def cmd_webhook_demo(args: argparse.Namespace) -> int:
     request = runner._request_for_case(case)
     response = provider.judge(get_detector("price"), request)
     event = build_change_event(response.result or {}, request, {"case_id": case["case_id"]})
+    event_errors = validate_schema(event, "change-event")
+    if event_errors:
+        return _fail(f"change event schema-invalid: {'; '.join(event_errors)}")
     secret = webhook.get_webhook_secret()
     headers, raw_body = webhook.build_signed_request(event, secret)
 
@@ -338,6 +372,7 @@ def cmd_webhook_demo(args: argparse.Namespace) -> int:
             received["ok"] = payload.ok
             received["reason"] = payload.reason
             received["event_id"] = (payload.event or {}).get("event_id")
+            received["event"] = payload.event
             self.send_response(200 if payload.ok else 401)
             self.end_headers()
             self.wfile.write(b'{"received":true}')
@@ -367,8 +402,14 @@ def cmd_webhook_demo(args: argparse.Namespace) -> int:
     stale = webhook.verify_request(stale_headers, raw_body, secret, args.tolerance)
     print(f"tampered body verdict: ok={tampered.ok} reason={tampered.reason}")
     print(f"stale timestamp verdict: ok={stale.ok} reason={stale.reason}")
+    received_event = received.get("event")
+    received_errors = (validate_schema(received_event, "change-event")
+                       if isinstance(received_event, dict)
+                       else ["no canonical event received"])
+    print(f"received event schema: {'ok' if not received_errors else '; '.join(received_errors)}")
     server.server_close()
-    ok = received.get("ok") is True and not tampered.ok and not stale.ok
+    ok = (received.get("ok") is True and not tampered.ok and not stale.ok
+          and not received_errors)
     print("webhook-demo: PASS" if ok else "webhook-demo: FAIL")
     return 0 if ok else 1
 

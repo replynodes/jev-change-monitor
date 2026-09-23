@@ -23,6 +23,14 @@ These are integration/repro checks over the *committed* tree, not unit tests:
    artifact must never contain the raw command value, and any recorded
    `command_label` must be a strict-allowlist basename. This is a
    deterministic CLI/artifact inspection, not a unit test.
+5. JEV_HTTP endpoint hygiene — a poisoned `JEV_ENDPOINT` (URL carrying
+   credential-shaped tokens) and `JEV_API_KEY` are pushed through a fully
+   configured `JevHttpProvider`: `describe()` must never contain the endpoint
+   or key, and a real (connection-refused) `judge()` call must record only a
+   bounded, withheld `provider_error` category — never the endpoint URL,
+   exception detail, or credential text — while keeping
+   `error_category = \"provider\"` so provider-error metrics stay wired.
+   Loopback port 1 keeps the probe deterministic and network-free.
 
 `jev-monitor validate` runs the same checks; `jev-monitor redact-check` is the
 standalone deterministic entry point.
@@ -108,6 +116,22 @@ _CMD_CREDENTIALS = [
     "sk-" + "abcdefghijklmn1234567890abcdefgh",
 ]
 _LABEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+# JEV_HTTP poison values: a URL that carries credential-shaped tokens in its
+# query and a bearer token shaped like a real API key. Assembled from parts so
+# no credential-shaped literal exists in the source tree. Loopback port 1 is
+# closed on every local host, so the connection is refused immediately and
+# deterministically — the probe never touches the external network. If the
+# provider ever echoed the endpoint or exception detail, these exact strings
+# would appear in describe()/provider_error and fail the gate.
+_HTTP_SK_TOKEN = "sk-" + "abcdef0123456789abcdef0123456789ab"
+_HTTP_RN_TOKEN = "rn_live_" + "abcdef0123456789abcdef0123"
+_HTTP_ENDPOINT_POISON = (
+    "http://127.0.0.1:1/chat/completions?token=" + _HTTP_SK_TOKEN
+    + "&key=" + _HTTP_RN_TOKEN
+)
+_HTTP_API_KEY_POISON = _HTTP_SK_TOKEN
+_HTTP_ENDPOINT_FRAGMENTS = ("http://", "127.0.0.1", "/chat/completions")
 
 
 def _iter_hash_strings(node, key=None, path=()):
@@ -318,6 +342,77 @@ def command_value_probe() -> list[str]:
     return problems
 
 
+def http_provider_probe() -> list[str]:
+    """Poison JEV_ENDPOINT/JEV_API_KEY; prove the endpoint never leaks.
+
+    Deterministic CLI/artifact inspection (not a unit test): with a fully
+    configured `JevHttpProvider`, `describe()` must never contain the endpoint
+    URL or the API key, and a real connection-refused `judge()` call must
+    record `provider_error` as a bounded, withheld category — never the
+    endpoint URL, exception detail, or credential text — while preserving
+    `error_category = "provider"` so provider-error metrics stay wired. The
+    endpoint points at loopback port 1 (immediate connection refusal), so the
+    probe never touches the external network.
+    """
+    import os
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_http import JevHttpProvider
+
+    problems: list[str] = []
+    tokens = (_HTTP_ENDPOINT_POISON, _HTTP_API_KEY_POISON)
+
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL")}
+    try:
+        os.environ["JEV_ENDPOINT"] = _HTTP_ENDPOINT_POISON
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+
+        provider = JevHttpProvider()
+        if not provider.configured:
+            problems.append("http probe: poison env did not configure the provider")
+
+        describe_blob = json.dumps(provider.describe(), sort_keys=True)
+        for token in tokens:
+            if token in describe_blob:
+                problems.append("http probe: raw endpoint/api-key text reached describe()")
+
+        case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+        request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+        response = provider.judge(get_detector("price"), request)
+        if response.error_category != "provider":
+            problems.append(
+                "http probe: provider failures must keep error_category='provider' "
+                "(provider-error metrics stay wired)"
+            )
+        provider_error = response.provider_error or ""
+        for token in tokens:
+            if token in provider_error:
+                problems.append("http probe: endpoint/credential text reached provider_error")
+        for fragment in _HTTP_ENDPOINT_FRAGMENTS:
+            if fragment in provider_error:
+                problems.append("http probe: provider_error exposes endpoint URL fragments")
+        if "details withheld" not in provider_error:
+            problems.append(
+                f"http probe: provider_error must be a bounded withheld category, "
+                f"got {provider_error!r}"
+            )
+        if ":" in provider_error and provider_error.startswith("URLError"):
+            problems.append(
+                f"http probe: provider_error must not carry URLError reason detail, "
+                f"got {provider_error!r}"
+            )
+    finally:
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
 def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     """All deterministic integrity checks; one problem per list entry."""
     problems: list[str] = []
@@ -325,4 +420,5 @@ def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     problems.extend(committed_artifact_checks(results_committed))
     problems.extend(rubric_citations())
     problems.extend(command_value_probe())
+    problems.extend(http_provider_probe())
     return problems

@@ -17,13 +17,15 @@ committed and validated against
 pip install -e .
 python3 scripts/generate_dataset.py --check          # fixtures match the generator
 jev-monitor validate                                 # schemas, counts, thresholds, artifacts
-# Run-local output goes to the gitignored results/runs/ dir; the committed
-# artifacts under results/committed/ are only ever overwritten by the explicit
-# regeneration command below (no --out), never by these reproducing commands.
+# Run-local output goes to the gitignored results/runs/ dir: every command in
+# this block writes there, so reproducing never rewrites the committed
+# artifacts under results/committed/. Those are only replaced by a deliberate
+# targeted regeneration (a benchmark or `blocked-live` run without --out) in
+# the change that owns them.
 jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
 jev-monitor benchmark --split dev --provider heuristic --out results/runs/dev-deterministic.json
 jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09 --out results/runs/held_out-deterministic-fault-injection.json
-jev-monitor blocked-live
+jev-monitor blocked-live --out results/runs/live-jev-blocked.json
 jev-monitor repro-check --split held_out             # deterministic metrics are byte-stable
 ```
 

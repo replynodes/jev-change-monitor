@@ -15,7 +15,7 @@ jev-monitor redact-check                              # redaction integrity + ru
 jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
 jev-monitor benchmark --split dev --provider heuristic --out results/runs/dev-deterministic.json
 jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09 --out results/runs/held_out-deterministic-fault-injection.json
-jev-monitor blocked-live
+jev-monitor blocked-live --out results/runs/live-jev-blocked.json
 jev-monitor repro-check --split held_out
 ```
 
