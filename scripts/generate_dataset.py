@@ -10,10 +10,26 @@ byte-for-byte deterministically:
 
     python3 scripts/generate_dataset.py --check
 
+Split separation (#487)
+-----------------------
+`datasets/held_out/` is the evaluation split and `datasets/dev/` is the
+development/tuning split, and they are separate *fixture sites*:
+
+- held-out uses the invented product "Acme Analytics" (markup, plan copy,
+  feature copy, testimonial, navigation and footer authored for it);
+- dev uses a different invented product, "Bluepeak Analytics", with its own
+  markup, plan names, limits, copy, navigation and footer.
+
+No before/after snapshot content is shared between the splits — raw or
+normalized, alone or concatenated. `jev-monitor validate` fails on any such
+overlap (see `benchmark.dataset.cross_split_content_overlap`), so a tuner
+working on dev can never have memorised an exact held-out page.
+
 Provenance
 ----------
 - `synthetic`: fictional page content authored for this repository (Acme
-  Analytics is invented; no real product, customer or page copy).
+  Analytics and Bluepeak Analytics are both invented; no real product, customer
+  or page copy).
 - `derived`: structural patterns observed on public vendor pricing pages
   (retrieved 2026-09-23, HTTP 200) — billing-period toggles, per-seat rows,
   usage-limit rows, sales-contact gating. No page copy, price points, names or
@@ -68,6 +84,21 @@ SYNTHETIC_DETAIL = {
     "retrieved_at": None,
     "notes": "Fictional page content for 'Acme Analytics'. Not a real product, customer or page copy.",
 }
+
+DEV_SYNTHETIC_NOTES = (
+    "Fictional page content for 'Bluepeak Analytics' — the dev/tuning fixture site. "
+    "Authored separately from the held-out site 'Acme Analytics': the two splits share no "
+    "before/after page content (raw or normalized), which jev-monitor validate enforces. "
+    "Not a real product, customer or page copy."
+)
+
+
+def synthetic_detail(split: str) -> dict:
+    """Provenance detail for authored fixture content, per split's fixture site."""
+    if split == "dev":
+        return {**SYNTHETIC_DETAIL, "notes": DEV_SYNTHETIC_NOTES}
+    return SYNTHETIC_DETAIL
+
 
 DERIVED_SOURCES = {
     "vercel": "https://vercel.com/pricing",
@@ -223,7 +254,8 @@ def price_case(split: str, suffix: str, subtype: str, amount_before, currency_be
                rationale: str, direction=None, period: str = "month", period_after=None,
                base_disp=None, base_currency=None, base_period=None, note=None,
                provenance="synthetic", edge=False, before_edits=()) -> dict:
-    base = price_page(amount_disp=base_disp or _disp(amount_before),
+    build_page = dev_price_page if split == "dev" else price_page
+    base = build_page(amount_disp=base_disp or _disp(amount_before),
                       currency=base_currency or currency_before,
                       period=base_period or period)
     before_html = apply_edits(base, before_edits, f"{suffix}-before")
@@ -257,8 +289,14 @@ FIXTURE_NOTE = ("Static fixture: authored page snapshots and labels, not real Je
 def simple_case(split: str, detector: str, suffix: str, subtype: str, after_edits, meaningful: bool,
                 alert: bool, rationale: str, before_edits=(), provenance="synthetic",
                 edge=False, base: str | None = None, note=None) -> dict:
-    source = base if base is not None else {"price": PRICE_BASE, "saas_pricing": SAAS_BASE,
-                                            "product_change": PRODUCT_BASE}[detector]
+    if base is not None:
+        source = base
+    elif split == "dev":
+        source = {"price": DEV_PRICE_BASE, "saas_pricing": DEV_SAAS_BASE,
+                  "product_change": DEV_PRODUCT_BASE}[detector]
+    else:
+        source = {"price": PRICE_BASE, "saas_pricing": SAAS_BASE,
+                  "product_change": PRODUCT_BASE}[detector]
     before_html = apply_edits(source, before_edits, f"{suffix}-before")
     after_html = apply_edits(before_html, after_edits, f"{suffix}-after")
     return _case(split, f"{split_prefix(split)}-{DETECTOR_SLUG[detector]}-{suffix}", detector, subtype,
@@ -278,16 +316,18 @@ def _case(split: str, case_id: str, detector: str, subtype: str, before_html: st
           edge: bool) -> dict:
     before_at = BEFORE_AT if split == "held_out" else DEV_BEFORE_AT
     after_at = AFTER_AT if split == "held_out" else DEV_AFTER_AT
+    url = (f"https://example.invalid/{DETECTOR_SLUG[detector]}/{subtype}" if split == "held_out"
+           else f"https://bluepeak.example.invalid/{DETECTOR_SLUG[detector]}/{subtype}")
     return {
         "case_id": case_id,
         "detector": detector,
         "split": split,
         "provenance": provenance,
-        "provenance_detail": (SYNTHETIC_DETAIL if provenance == "synthetic"
-                            else (expected.pop("_detail", None) or SYNTHETIC_DETAIL)),
+        "provenance_detail": (synthetic_detail(split) if provenance == "synthetic"
+                            else (expected.pop("_detail", None) or synthetic_detail(split))),
         "subtype": subtype,
         "edge_case": edge,
-        "url": f"https://example.invalid/{DETECTOR_SLUG[detector]}/{subtype}",
+        "url": url,
         "label": {
             "meaningful": meaningful,
             "should_alert": alert,
@@ -724,54 +764,174 @@ EDGE_CASES = [
                 edge=True),
 ]
 
+# ------------------------------------------------------- dev split templates
+# The dev/tuning split is a *different fictional fixture site*: its own markup,
+# plan names, limits, feature copy, testimonial, navigation and footer. No page
+# content is shared with the held-out site ("Acme Analytics"); jev-monitor
+# validate enforces that (benchmark.dataset.cross_split_content_overlap).
+DEV_BRAND = "Bluepeak Analytics"
+DEV_FOOTER = ('<footer class="site-footer"><p>© 2025 Bluepeak Analytics</p>'
+              '<p><a href="/policies">Policies</a> · <a href="/news">News</a></p></footer>')
+
+
+def dev_price_div(amount_disp: str, currency: str, period: str) -> str:
+    return (f'<div class="tier-price"><span class="amount">{currency}{amount_disp}</span>'
+            f'<span class="cadence">/{period}</span></div>')
+
+
+def dev_price_page(amount_disp: str = "29", currency: str = "$", period: str = "month",
+                   plan: str = "Basic",
+                   testimonial: str = "Bluepeak replaced three spreadsheets for us.") -> str:
+    return page(f"""<header class="masthead"><nav><a href="/product">Product</a><a href="/plans">Plans</a><a href="/guides">Guides</a></nav></header>
+<main id="plans">
+<h1>Bluepeak Analytics plan pricing</h1>
+<section class="tier">
+<h2 class="tier-name">{plan}</h2>
+{dev_price_div(amount_disp, currency, period)}
+<ul class="included"><li>Live dashboards</li><li>Parquet export</li><li>Community support</li></ul>
+<p class="terms">All amounts are shown in USD and exclude sales tax.</p>
+<p class="logistics"><li>Free shipping on orders over $75</li></p>
+<p class="extras">Add-on: Scheduled reporting $12/month</p>
+</section>
+<section class="quotes"><blockquote>{testimonial}</blockquote><p>Robin, analytics engineer</p></section>
+</main>
+{DEV_FOOTER}""", "Plans and pricing — Bluepeak Analytics")
+
+
+DEV_PRICE_BASE = dev_price_page()
+DEV_PRICE_DIV = dev_price_div("29", "$", "month")
+DEV_PRICE_PLAN_NAME = '<h2 class="tier-name">Basic</h2>'
+DEV_PRICE_TESTIMONIAL = "<blockquote>Bluepeak replaced three spreadsheets for us.</blockquote>"
+
+DEV_SAAS_BASIC = ("<tr><td>Basic</td><td>10,000 requests / month</td><td>3 editors</td>"
+                  "<td>25 GB storage</td><td>$19/month</td></tr>")
+DEV_SAAS_STANDARD = ("<tr><td>Standard</td><td>100,000 requests / month</td><td>15 editors</td>"
+                     "<td>250 GB storage</td><td>$79/month</td></tr>")
+DEV_SAAS_PREMIUM = ("<tr><td>Premium</td><td>1,000,000 requests / month</td><td>60 editors</td>"
+                    "<td>2 TB storage</td><td>$249/month</td></tr>")
+DEV_SAAS_ADDON = "<li>SCIM provisioning add-on: $15/month per workspace</li>"
+DEV_SAAS_OVERAGE = "<li>Overage: $0.03 per 1,000 requests</li>"
+DEV_SAAS_TRIAL = '<p class="trial-note">21-day evaluation on every plan.</p>'
+DEV_SAAS_FREE = '<p class="free-note">Free tier: 500 requests / month, 1 editor.</p>'
+DEV_SAAS_TESTIMONIAL = "<blockquote>Our billing questions stopped after one week.</blockquote>"
+DEV_SAAS_TYPO = "<p>Recieve request alerts by email if you opt in.</p>"
+
+
+def dev_saas_page() -> str:
+    return page(f"""<header class="masthead"><nav><a href="/product">Product</a><a href="/plans">Plans</a><a href="/guides">Guides</a></nav></header>
+<main id="plans">
+<h1>Straightforward pricing</h1>
+<table class="tiers">
+<tr><th>Plan</th><th>Usage</th><th>Editors</th><th>Storage</th><th>Price</th></tr>
+{DEV_SAAS_BASIC}
+{DEV_SAAS_STANDARD}
+{DEV_SAAS_PREMIUM}
+</table>
+<section class="terms">
+<ul class="addons">{DEV_SAAS_ADDON}</ul>
+<ul class="usage">{DEV_SAAS_OVERAGE}</ul>
+{DEV_SAAS_TRIAL}
+{DEV_SAAS_FREE}
+{DEV_SAAS_TYPO}
+<p class="faq">See the <a href="/guides/billing">billing guide</a>.</p>
+</section>
+<section class="quotes">{DEV_SAAS_TESTIMONIAL}<p>Morgan, platform lead</p></section>
+</main>
+{DEV_FOOTER}""", "Plans and pricing — Bluepeak Analytics")
+
+
+DEV_SAAS_BASE = dev_saas_page()
+
+DEV_PRODUCT_NAV = ('<nav><a href="/product">Product</a><a href="/release-log">Release log</a>'
+                   '<a href="/connectors">Connectors</a><a href="/plans">Plans</a></nav>')
+DEV_PRODUCT_STATUS = '<div class="service-status">All Bluepeak services are operational</div>'
+DEV_PRODUCT_HERO = '<img src="/assets/bluepeak-hero-2026-08.png" alt="Bluepeak Analytics workspace">'
+DEV_PRODUCT_FEATURES = ('<ul class="capabilities"><li>Live dashboards</li><li>Parquet export</li>'
+                        '<li>Custom alerts</li></ul>')
+DEV_PRODUCT_INTEGRATIONS = ('<ul class="connectors"><li>Zapier connector</li>'
+                            '<li>Google Sheets connector</li></ul>')
+DEV_PRODUCT_CHANGELOG = '<ul class="release-log"><li>2026-08-20 — Faster Parquet exports.</li></ul>'
+DEV_PRODUCT_TYPO = "<p>Set up takes minutse with no enginering backlog.</p>"
+
+
+def dev_product_page() -> str:
+    return page(f"""<header class="masthead">{DEV_PRODUCT_NAV}</header>
+<main id="product">
+{DEV_PRODUCT_STATUS}
+<h1>Bluepeak Analytics</h1>
+{DEV_PRODUCT_HERO}
+<p>Operational analytics for data teams that ship weekly.</p>
+{DEV_PRODUCT_FEATURES}
+{DEV_PRODUCT_INTEGRATIONS}
+<p class="support">Support: community forum, 3 business days.</p>
+{DEV_PRODUCT_CHANGELOG}
+{DEV_PRODUCT_TYPO}
+<p class="quote">"Bluepeak cut our reporting backlog to zero." — Dana, data lead</p>
+</main>
+{DEV_FOOTER}""", "Bluepeak Analytics")
+
+
+DEV_PRODUCT_BASE = dev_product_page()
+
+
 # --------------------------------------------------------------------- dev split
 DEV_CASES = [
     price_case("dev", "001", "price_drop_dev", 29, "$", 19, "$",
-               [(PRICE_DIV, price_div("19", "$", "month"))], True, True,
+               [(DEV_PRICE_DIV, dev_price_div("19", "$", "month"))], True, True,
                "Development tuning fixture: monthly price dropped $29→$19."),
     price_case("dev", "002", "no_change_dev", 29, "$", 29, "$", [], False, False,
                "Development tuning fixture: identical snapshots."),
     price_case("dev", "003", "footer_only_dev", 29, "$", 29, "$",
-               [(PRICE_FOOTER, "<footer><p>© 2026 Acme Analytics</p></footer>")], False, False,
+               [(DEV_FOOTER, '<footer class="site-footer"><p>© 2026 Bluepeak Analytics</p>'
+                             '<p><a href="/policies">Policies</a> · <a href="/news">News</a></p></footer>')],
+               False, False,
                "Development tuning fixture: footer-year noise."),
     price_case("dev", "004", "annual_toggle_dev", 29, "$", 290, "$",
-               [(PRICE_DIV, price_div("290", "$", "year"))], True, True,
+               [(DEV_PRICE_DIV, dev_price_div("290", "$", "year"))], True, True,
                "Development tuning fixture: monthly→annual toggle.", period_after="year"),
     price_case("dev", "005", "testimonial_dev", 29, "$", 29, "$",
-               [(PRICE_TESTIMONIAL, "<blockquote>Discounts finally make sense.</blockquote>")], False, False,
+               [(DEV_PRICE_TESTIMONIAL, "<blockquote>Renewals take one click now.</blockquote>")],
+               False, False,
                "Development tuning fixture: testimonial noise."),
     simple_case("dev", "saas_pricing", "006", "limit_dev",
-                [("10,000 API calls / month", "20,000 API calls / month")], True, True,
+                [("10,000 requests / month", "20,000 requests / month")], True, True,
                 "Development tuning fixture: usage limit raised."),
     simple_case("dev", "saas_pricing", "007", "nav_dev",
-                [('<h1>Simple pricing</h1>', "<h1>Pricing that scales with you</h1>")], False, False,
+                [("<h1>Straightforward pricing</h1>", "<h1>Pricing that scales with your data</h1>")],
+                False, False,
                 "Development tuning fixture: heading wording noise."),
     simple_case("dev", "saas_pricing", "008", "plan_added_dev",
-                [(SAAS_SCALE, SAAS_SCALE + "\n<tr><td>Dedicated</td><td>Contact sales</td>"
-                                            "<td>Custom</td><td>Custom</td><td>Custom</td></tr>")], True, True,
+                [(DEV_SAAS_PREMIUM, DEV_SAAS_PREMIUM + "\n<tr><td>Enterprise</td><td>Unlimited requests</td>"
+                                                       "<td>Unlimited</td><td>Unlimited</td><td>Contact sales</td></tr>")],
+                True, True,
                 "Development tuning fixture: enterprise plan row added."),
     simple_case("dev", "saas_pricing", "009", "addon_dev",
-                [(SAAS_ADDON, "<li>SSO add-on: $25/month per workspace</li>")], True, True,
+                [(DEV_SAAS_ADDON, "<li>SCIM provisioning add-on: $22/month per workspace</li>")], True, True,
                 "Development tuning fixture: add-on price change."),
     simple_case("dev", "saas_pricing", "010", "testimonial_dev",
-                [(SAAS_TESTIMONIAL, "<blockquote>Best billing page we have seen.</blockquote>")], False, False,
+                [(DEV_SAAS_TESTIMONIAL, "<blockquote>The clearest billing summary we have used.</blockquote>")],
+                False, False,
                 "Development tuning fixture: testimonial noise."),
     simple_case("dev", "product_change", "011", "feature_added_dev",
-                [(PRODUCT_FEATURES, PRODUCT_FEATURES + "<li>Team workspaces</li>")], True, True,
+                [(DEV_PRODUCT_FEATURES, DEV_PRODUCT_FEATURES + "<li>Team workspaces</li>")], True, True,
                 "Development tuning fixture: feature added."),
     simple_case("dev", "product_change", "012", "color_dev",
-                [("<h1>Acme Analytics</h1>", '<h1 class="title-v2">Acme Analytics</h1>')], False, False,
+                [("<h1>Bluepeak Analytics</h1>", '<h1 class="title-v2">Bluepeak Analytics</h1>')], False, False,
                 "Development tuning fixture: markup/class noise."),
     simple_case("dev", "product_change", "013", "deprecation_dev",
-                [(PRODUCT_CHANGELOG, PRODUCT_CHANGELOG.replace("</ul>",
-                  "<li>2026-09-01 — Legacy webhooks deprecated; use /v2/webhooks.</li></ul>"))], True, True,
+                [(DEV_PRODUCT_CHANGELOG, DEV_PRODUCT_CHANGELOG.replace("</ul>",
+                  "<li>2026-09-01 — Legacy webhook endpoints deprecated; use /v2/hooks.</li></ul>"))],
+                True, True,
                 "Development tuning fixture: deprecation notice."),
     simple_case("dev", "product_change", "014", "cookie_dev",
-                [("<h1>Acme Analytics</h1>", "<h1>Acme Analytics</h1>\n<div class=\"cookie\">Cookie notice</div>")],
-                False, False, "Development tuning fixture: cookie banner noise."),
+                [("<h1>Bluepeak Analytics</h1>",
+                  "<h1>Bluepeak Analytics</h1>\n<div class=\"cookie\">Cookie notice</div>")],
+                False, False,
+                "Development tuning fixture: cookie banner noise."),
     simple_case("dev", "product_change", "015", "integration_dev",
-                [(PRODUCT_INTEGRATIONS, PRODUCT_INTEGRATIONS.replace("</ul>", "<li>Snowflake sync</li></ul>"))],
-                True, True, "Development tuning fixture: integration added."),
+                [(DEV_PRODUCT_INTEGRATIONS, DEV_PRODUCT_INTEGRATIONS.replace("</ul>", "<li>Snowflake sync</li></ul>"))],
+                True, True,
+                "Development tuning fixture: integration added."),
 ]
 
 

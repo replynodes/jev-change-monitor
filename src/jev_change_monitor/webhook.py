@@ -1,4 +1,4 @@
-"""HMAC-SHA256 webhook signing and verification (couldonical contract).
+"""HMAC-SHA256 webhook signing and verification (canonical contract).
 
 Canonical headers (per replynodes/replynodes-fetcher #485):
 - `X-ReplyNodes-Event-Id`

@@ -21,6 +21,31 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from jev_change_monitor.detectors import DetectorSpec
+from jev_change_monitor.normalize import MAX_NORMALIZED_CHARS, normalize_bounded
+
+
+def bounded_evidence(request: dict) -> tuple[dict[str, str], dict]:
+    """Bounded normalized evidence for a provider prompt.
+
+    Page content is untrusted input (docs/detector-contracts.md): the runner
+    keeps the raw snapshot plus `sha256`/`byte_count` in the request, and each
+    provider bounds what actually reaches the judgement model. This returns
+    `({"before": ..., "after": ...}, meta)` where each snapshot is
+    `normalize.normalize_bounded` output, capped at 64,000 chars, and `meta`
+    records normalization + truncation so providers can surface it honestly.
+    """
+    evidence: dict[str, str] = {}
+    truncated = False
+    for side in ("before", "after"):
+        text, side_truncated = normalize_bounded(request[side]["content"])
+        evidence[side] = text
+        truncated = truncated or side_truncated
+    meta = {
+        "evidence_normalized": True,
+        "evidence_truncated": truncated,
+        "evidence_cap_chars": MAX_NORMALIZED_CHARS,
+    }
+    return evidence, meta
 
 
 @dataclass

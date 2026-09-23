@@ -63,10 +63,20 @@ capability changes; suppress cosmetic/layout/footer/testimonial/nav noise.
 
 ## Input caps and normalization
 
-`normalize.normalize_html` strips script/style, converts HTML entities,
-collapses whitespace and caps at 64,000 chars / 2,000 evidence lines.
-Requests carry `sha256` + `byte_count` per snapshot, verified at benchmark
-time.
+Captured page content is untrusted input and is never executed or trusted:
+- The runner builds the request snapshot from each fixture: raw `content`
+  plus `sha256` and `byte_count` (the identity of the capture).
+- Providers bound what reaches the judgement model:
+  `normalize.normalize_bounded` strips script/style, decodes HTML entities,
+  collapses whitespace and caps the evidence at `MAX_NORMALIZED_CHARS`
+  (64,000), returning `(text, truncated)`. `jev-http` and `jev-command` send
+  that bounded normalized evidence and record normalization/truncation on the
+  response (`usage.evidence_normalized`, `usage.evidence_truncated`,
+  `usage.evidence_cap_chars`); raw captures are not forwarded to the model.
+- The deterministic baseline normalizes the same way and caps diff evidence at
+  `MAX_EVIDENCE_LINES` (2,000 added/removed lines).
+- `signals.truncated_input` in a result envelope is provider-reported; this
+  OSS runner does not synthesise it.
 
 ## Providers
 

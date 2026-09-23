@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from jev_change_monitor.normalize import sha256_text
+from jev_change_monitor.normalize import normalize_html, sha256_text
 from jev_change_monitor.schemas import validate_schema
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -28,6 +28,13 @@ MIN_HELD_OUT_TOTAL = 100
 MIN_PER_DETECTOR = 30
 MIN_EDGE_CASES = 10
 DETECTORS = ("price", "saas_pricing", "product_change")
+
+# Fingerprints checked for cross-split leakage: each before/after snapshot,
+# raw and normalized, alone and concatenated (issue replynodes/replynodes-fetcher#487).
+CONTENT_HASH_KINDS = (
+    "before_raw", "after_raw", "before_normalized", "after_normalized",
+    "pair_raw", "pair_normalized",
+)
 
 
 def split_path(split: str) -> Path:
@@ -145,3 +152,81 @@ def split_accounting(split: str) -> dict:
         report["minimums"] = minimums
         report["minimums_ok"] = all(minimums.values())
     return report
+
+
+def content_hashes(case: dict) -> dict[str, str]:
+    """Content fingerprints for one case.
+
+    Returns one SHA-256 per CONTENT_HASH_KIND: the before/after snapshot raw,
+    each normalized, and the raw/normalized concatenation. The normalized
+    fingerprints close the loophole of raw-only checks (a tuner could memorise
+    the *effectively visible* page, not just its bytes).
+    """
+    before = case.get("before", {}).get("content")
+    after = case.get("after", {}).get("content")
+    if not isinstance(before, str) or not isinstance(after, str):
+        raise ValueError(f"{case.get('case_id', '<no-id>')}: snapshot content missing")
+    before_norm = normalize_html(before)
+    after_norm = normalize_html(after)
+    return {
+        "before_raw": sha256_text(before),
+        "after_raw": sha256_text(after),
+        "before_normalized": sha256_text(before_norm),
+        "after_normalized": sha256_text(after_norm),
+        "pair_raw": sha256_text(before + "\x00" + after),
+        "pair_normalized": sha256_text(before_norm + "\x00" + after_norm),
+    }
+
+
+def cross_split_content_overlap() -> list[dict]:
+    """Any shared before/after content between held_out and dev.
+
+    #487 requires development/tuning and held-out evaluation to be separate.
+    Identical page content in both splits would let a tuner memorise exact
+    held-out pages, so duplicate case_ids are not enough: every snapshot is
+    fingerprinted (raw and normalized, alone and concatenated) and any hash
+    present in both splits is a leak. `jev-monitor validate` fails on any hit.
+    """
+    fingerprints: dict[str, dict] = {}
+    for split in ("held_out", "dev"):
+        fingerprints[split] = {}
+        for case in load_cases(split, validate=False):
+            try:
+                hashes = content_hashes(case)
+            except ValueError as exc:
+                raise ValueError(f"{split}:{exc}") from exc
+            for kind, digest in hashes.items():
+                fingerprints[split].setdefault(kind, {}).setdefault(digest, []).append(
+                    case.get("case_id", "<no-id>")
+                )
+    collisions: list[dict] = []
+    for kind in CONTENT_HASH_KINDS:
+        held = fingerprints["held_out"].get(kind, {})
+        dev = fingerprints["dev"].get(kind, {})
+        for digest in sorted(set(held) & set(dev)):
+            collisions.append({
+                "kind": kind,
+                "sha256": digest,
+                "held_out": sorted(held[digest]),
+                "dev": sorted(dev[digest]),
+            })
+    return collisions
+
+
+def duplicate_snapshot_groups(split: str) -> int:
+    """Count content hashes shared between cases *within* one split.
+
+    Informational only: cases in the same split legitimately share a page (the
+    same site observed at different times, byte-identical no-change pairs, or
+    promo add/remove pairs). Cross-split sharing is the leak; see
+    `cross_split_content_overlap`.
+    """
+    shared: set[str] = set()
+    seen: dict[str, list[str]] = {}
+    for case in load_cases(split, validate=False):
+        for digest in content_hashes(case).values():
+            if digest in seen:
+                shared.add(digest)
+            else:
+                seen[digest] = [case.get("case_id", "<no-id>")]
+    return len(shared)

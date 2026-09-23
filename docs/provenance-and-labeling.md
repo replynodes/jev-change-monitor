@@ -6,8 +6,12 @@ Every fixture records `provenance` (one of `synthetic`, `real_public`,
 `derived`) and `provenance_detail` with kind, author, license and permission
 state.
 
-- `synthetic`: fictional content authored for this repository (Acme Analytics
-  is invented). License `Apache-2.0 (authored for this repository)`.
+- `synthetic`: fictional content authored for this repository. Two invented
+  fixture sites exist, one per split: "Acme Analytics" (held-out) and
+  "Bluepeak Analytics" (dev/tuning). Each split's page content is authored
+  separately, and `jev-monitor validate` fails if any before/after snapshot
+  content (raw or normalized) is shared across the splits. License
+  `Apache-2.0 (authored for this repository)`.
 - `derived`: structural patterns observed on public vendor pricing pages
   (vercel.com/pricing, linear.app/pricing, notion.com/pricing; retrieved
   2026-09-23, HTTP 200). Each derived case records `source_url`,

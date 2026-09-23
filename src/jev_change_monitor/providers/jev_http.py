@@ -20,7 +20,7 @@ import urllib.error
 import urllib.request
 
 from jev_change_monitor.detectors import DetectorSpec
-from jev_change_monitor.providers.base import ProviderResponse
+from jev_change_monitor.providers.base import ProviderResponse, bounded_evidence
 from jev_change_monitor.redact import env_flag
 
 
@@ -47,7 +47,8 @@ class JevHttpProvider:
     def configured(self) -> bool:
         return bool(self.endpoint and self.api_key)
 
-    def _request_body(self, detector: DetectorSpec, request: dict) -> dict:
+    def _request_body(self, detector: DetectorSpec, request: dict) -> tuple[dict, dict]:
+        evidence, meta = bounded_evidence(request)
         return {
             "model": self.model or detector.id,
             "messages": [
@@ -55,13 +56,13 @@ class JevHttpProvider:
                 {
                     "role": "user",
                     "content": detector.prompt_user
-                    .replace("<before>", request["before"]["content"])
-                    .replace("<after>", request["after"]["content"]),
+                    .replace("<before>", evidence["before"])
+                    .replace("<after>", evidence["after"]),
                 },
             ],
             "temperature": 0,
             "response_format": {"type": "json_object"},
-        }
+        }, meta
 
     def judge(self, detector: DetectorSpec, request: dict) -> ProviderResponse:
         if not self.configured:
@@ -70,7 +71,8 @@ class JevHttpProvider:
                 latency_ms=0.0, input_bytes=0, output_bytes=0, schema_valid=False,
                 error_category="provider", provider_error="JEV_ENDPOINT/JEV_API_KEY not configured",
             )
-        body = json.dumps(self._request_body(detector, request), ensure_ascii=False).encode("utf-8")
+        request_body, meta = self._request_body(detector, request)
+        body = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             self.endpoint,
             data=body,
@@ -80,6 +82,7 @@ class JevHttpProvider:
         )
         attempt = 0
         last_error = None
+        evidence_meta = meta
         while attempt <= self.retries:
             attempt += 1
             start = time.perf_counter()
@@ -94,7 +97,8 @@ class JevHttpProvider:
                     input_bytes=len(body),
                     output_bytes=len(json.dumps(result).encode("utf-8")),
                     schema_valid=True, error_category="none", retries=attempt - 1,
-                    usage={"model": self.model, "endpoint": "configured (not logged)"},
+                    usage={"model": self.model, "endpoint": "configured (not logged)",
+                           **evidence_meta},
                 )
             except urllib.error.HTTPError as exc:
                 last_error = f"HTTP {exc.code}"

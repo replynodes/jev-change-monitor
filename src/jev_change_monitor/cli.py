@@ -24,6 +24,7 @@ from jev_change_monitor.detectors import VALID_DETECTORS, get_detector
 from jev_change_monitor.providers import get_provider
 from jev_change_monitor.redact import env_flag, redact_value
 from jev_change_monitor.schemas import list_schemas, validate_all_schemas, validate_schema
+from jev_change_monitor.benchmark.runner import display_path
 
 REPO_ROOT = dataset.REPO_ROOT
 RESULTS_COMMITTED = REPO_ROOT / "results" / "committed"
@@ -73,6 +74,29 @@ def cmd_validate(args: argparse.Namespace) -> int:
     for split in ("held_out", "dev"):
         cases = dataset.load_cases(split, validate=True)
         print(f"  {split}: {len(cases)} cases schema-valid")
+
+    print("== split separation (held_out vs dev content, #487) ==")
+    try:
+        overlaps = dataset.cross_split_content_overlap()
+    except ValueError as exc:
+        problems.append(str(exc))
+        overlaps = []
+    if overlaps:
+        print(f"  FAIL {len(overlaps)} shared content hash(es) across splits:")
+        for item in overlaps:
+            print(f"    {item['kind']}: {item['sha256'][:16]} held_out={item['held_out']} "
+                  f"dev={item['dev']}")
+        problems.append(
+            f"cross-split content overlap: {len(overlaps)} shared hash(es); "
+            "dev/tuning and held-out must not share before/after page content (#487)"
+        )
+    else:
+        print("  ok  zero shared before/after content hashes across held_out and dev "
+              f"({'/'.join(dataset.CONTENT_HASH_KINDS)})")
+    for split in ("held_out", "dev"):
+        groups = dataset.duplicate_snapshot_groups(split)
+        print(f"  note {split}: {groups} hash(es) shared between cases within the split "
+              "(allowed — same page observed at different times; not cross-split leakage)")
 
     print("== thresholds ==")
     ok, reason = thresholds_mod.check_frozen()
@@ -128,14 +152,17 @@ def cmd_benchmark(args: argparse.Namespace) -> int:
         if args.fault_injection_rate:
             name += "-fault-injection"
         out = RESULTS_COMMITTED / provider.name / f"{name}.json"
-    artifact = runner.run(
-        split=args.split,
-        provider_name=provider.name,
-        provider=provider,
-        out_path=out,
-        fault_injection_rate=args.fault_injection_rate,
-        command=" ".join(["jev-monitor", "benchmark", *sys.argv[2:]]),
-    )
+    try:
+        artifact = runner.run(
+            split=args.split,
+            provider_name=provider.name,
+            provider=provider,
+            out_path=out,
+            fault_injection_rate=args.fault_injection_rate,
+            command=" ".join(["jev-monitor", "benchmark", *sys.argv[2:]]),
+        )
+    except OSError as exc:
+        return _fail(f"cannot write {display_path(out)}: {exc}")
     print(json.dumps({
         "evaluation_kind": artifact["evaluation_kind"],
         "evaluation_kind_note": (
@@ -177,7 +204,7 @@ def cmd_repro_check(args: argparse.Namespace) -> int:
     if committed.exists():
         stored = json.loads(committed.read_text(encoding="utf-8"))
         same_as_committed, diffs = runner.artifacts_equal(stored, first)
-        print(f"matches committed artifact {committed.relative_to(REPO_ROOT)}: "
+        print(f"matches committed artifact {display_path(committed)}: "
               f"{'PASS' if same_as_committed else 'FAIL'}")
         for d in diffs:
             print(f"  - {d}")
@@ -196,7 +223,7 @@ def cmd_gate(args: argparse.Namespace) -> int:
     errors = validate_schema(artifact, "benchmark-result")
     if errors:
         return _fail(f"result artifact invalid: {'; '.join(errors)}")
-    print(f"artifact: {path.relative_to(REPO_ROOT)}")
+    print(f"artifact: {display_path(path)}")
     print(f"provider: {artifact['provider']['provider']} ({artifact['evaluation_kind']})")
     print(f"launch claim: {artifact['launch_claim']['status']}")
     for reason in artifact["launch_claim"]["reasons"]:
@@ -425,9 +452,12 @@ def cmd_blocked_live(args: argparse.Namespace) -> int:
     out = Path(args.out)
     if not out.is_absolute():
         out = REPO_ROOT / out
-    out.parent.mkdir(parents=True, exist_ok=True)
-    runner._write_json(out, artifact)  # noqa: SLF001 - shared writer
-    print(f"wrote {out.relative_to(REPO_ROOT)}")
+    try:
+        out.parent.mkdir(parents=True, exist_ok=True)
+        runner._write_json(out, artifact)  # noqa: SLF001 - shared writer
+    except OSError as exc:
+        return _fail(f"cannot write {display_path(out)}: {exc}")
+    print(f"wrote {display_path(out)}")
     print(f"launch claim: {artifact['launch_claim']['status']}")
     for reason in reasons:
         print(f"  blocked: {reason}")

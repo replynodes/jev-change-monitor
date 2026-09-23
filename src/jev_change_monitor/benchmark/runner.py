@@ -261,8 +261,21 @@ def run(
         out_path.parent.mkdir(parents=True, exist_ok=True)
         _write_json(out_path, artifact)
         if not quiet:
-            print(f"wrote {out_path.relative_to(REPO_ROOT)}")
+            print(f"wrote {display_path(out_path)}")
     return artifact
+
+
+def display_path(path: Path) -> str:
+    """Repo-relative display path, falling back to the absolute path.
+
+    `Path.relative_to` raises ValueError for paths outside the repository, so
+    `--out /tmp/...` used to crash with a traceback instead of working. Any
+    path is allowed; only its presentation differs.
+    """
+    try:
+        return str(path.relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def _self_hash(artifact: dict) -> str:

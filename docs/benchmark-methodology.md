@@ -16,6 +16,10 @@ jev-monitor blocked-live
 jev-monitor repro-check --split held_out
 ```
 
+`jev-monitor validate` also proves the #487 split separation: it fingerprints
+every before/after snapshot (raw and normalized, alone and concatenated) and
+fails on any content hash shared between `dev/` and `held_out/`.
+
 ## Fixed thresholds (committed before any held-out run)
 
 `benchmark/thresholds.json` (SHA-256 locked in
@@ -57,7 +61,7 @@ the counts.
 ## Reproducibility
 
 `runner.comparable_view()` strips volatile fields (timestamps, latency, run
-id, environment) and `repo-check` asserts two consecutive runs produce
+id, environment) and `repro-check` asserts two consecutive runs produce
 identical metrics, evaluations and per-case verdicts against the committed
 artifact.
 

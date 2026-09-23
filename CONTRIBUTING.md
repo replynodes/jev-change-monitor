@@ -23,9 +23,13 @@ The shared envelope stays identical. Extend
 Add cases to `scripts/generate_dataset.py`:
 
 - template the page HTML for your detector (like `SAAS_BASE` /
-  `PRODUCT_BASE`)
+  `PRODUCT_BASE`; `DEV_*` templates for the dev split)
 - write explicit case specs with `subtype`, edits, label, rationale
 - split: `DEV_CASES` for tuning, held-out lists for evaluation
+- dev/tuning fixtures are a **separate fixture site**: never reuse held-out
+  page templates, plan copy or copy strings. `jev-monitor validate` fingerprints
+  every snapshot (raw + normalized) and fails on any content shared across the
+  `dev/` and `held_out/` splits (#487).
 - every case must record provenance + `provenance_detail` and complete
   labeling fields, and must be static (fixtures are never Jev outputs)
 

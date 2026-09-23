@@ -68,8 +68,8 @@ def sha256_text(text: str) -> str:
     return sha256_bytes(text.encode("utf-8"))
 
 
-def normalize_html(raw: str) -> str:
-    """HTML -> collapsed-text blocks, bounded for provider input."""
+def _normalized_text(raw: str) -> str:
+    """HTML -> collapsed-text blocks (uncapped)."""
     parser = _TextExtractor()
     try:
         parser.feed(raw)
@@ -79,7 +79,24 @@ def normalize_html(raw: str) -> str:
     text = "".join(parser.parts)
     lines = [re.sub(r"[ \t\u00a0]+", " ", ln).strip() for ln in text.splitlines()]
     lines = [ln for ln in lines if ln]
-    return "\n".join(lines)[:MAX_NORMALIZED_CHARS]
+    return "\n".join(lines)
+
+
+def normalize_html(raw: str) -> str:
+    """HTML -> collapsed-text blocks, bounded for provider input."""
+    return _normalized_text(raw)[:MAX_NORMALIZED_CHARS]
+
+
+def normalize_bounded(raw: str) -> tuple[str, bool]:
+    """Bounded evidence for provider input: returns (text, truncated).
+
+    Applies the documented normalization (script/style stripped, HTML entities
+    decoded, whitespace collapsed) and caps at MAX_NORMALIZED_CHARS. The
+    `truncated` flag reports whether the cap dropped content, so providers can
+    record truncation instead of silently hiding it (docs/detector-contracts.md).
+    """
+    text = _normalized_text(raw)
+    return text[:MAX_NORMALIZED_CHARS], len(text) > MAX_NORMALIZED_CHARS
 
 
 def split_paragraphs(text: str) -> list[str]:

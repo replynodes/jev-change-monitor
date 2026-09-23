@@ -12,6 +12,19 @@ equality).
 - `labeling-rubric.md`-equivalent policy lives in
   `docs/provenance-and-labeling.md`.
 
+## Split separation (issue #487)
+
+`held_out/` and `dev/` are separate *fixture sites*: held-out pages are
+authored for the invented product "Acme Analytics"; dev/tuning pages are
+authored for a different invented product, "Bluepeak Analytics", with its own
+markup, plan names, limits, feature copy, testimonial, navigation and footer.
+
+No before/after snapshot content is shared between the splits — raw or
+normalized, alone or concatenated. `jev-monitor validate` computes this itself
+and **fails on any cross-split content hash**; it is not enough that `case_id`
+values are unique, because identical page content in both splits would let a
+tuner memorise exact held-out pages.
+
 ## Provenance
 
 Every case records `provenance` and `provenance_detail`:

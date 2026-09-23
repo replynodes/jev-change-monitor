@@ -1,9 +1,14 @@
 """Live Jev provider via an explicitly configured local command.
 
-Contract: `JEV_COMMAND` names an executable that reads one JSON object (the
-DetectorRequest plus the detector prompt text) on stdin and writes one JSON
-object (the detector result, optionally wrapped in an OpenAI-style
-`{"choices":[{"message":{"content":"..."}}]}` envelope) on stdout.
+Contract: `JEV_COMMAND` names an executable that reads one JSON object on
+stdin and writes one JSON object (the detector result, optionally wrapped in
+an OpenAI-style `{"choices":[{"message":{"content":"..."}}]}` envelope) on
+stdout. The input carries the detector prompt text plus bounded, normalized
+evidence per snapshot (see `bounded_evidence` in providers/base.py): script/
+style stripped, entities decoded, whitespace collapsed, capped at 64,000
+chars, with `evidence.truncated` recording whether the cap dropped content.
+Raw capture HTML is not forwarded; `sha256`/`byte_count` identify the capture
+the evidence came from. Never executes page content.
 
 Credential discipline: the value passed to the command is environment-only;
 the command string itself must not contain secrets. If `JEV_COMMAND` is
@@ -19,7 +24,8 @@ import subprocess
 import time
 
 from jev_change_monitor.detectors import DetectorSpec
-from jev_change_monitor.providers.base import ProviderResponse
+from jev_change_monitor.normalize import MAX_NORMALIZED_CHARS
+from jev_change_monitor.providers.base import ProviderResponse, bounded_evidence
 from jev_change_monitor.redact import env_flag, redact_value
 
 
@@ -57,13 +63,28 @@ class JevCommandProvider:
                 latency_ms=0.0, input_bytes=0, output_bytes=0, schema_valid=False,
                 error_category="provider", provider_error="JEV_COMMAND not configured",
             )
+        evidence, meta = bounded_evidence(request)
         prompt_request = {
             "detector": detector.id,
             "system": detector.prompt_system,
-            "user": detector.prompt_user.replace("<before>", request["before"]["content"])
-            .replace("<after>", request["after"]["content"]),
-            "request": request,
+            "user": detector.prompt_user.replace("<before>", evidence["before"])
+            .replace("<after>", evidence["after"]),
+            "url": request.get("url"),
+            "before": {
+                "evidence": evidence["before"],
+                "sha256": request["before"]["sha256"],
+                "byte_count": request["before"]["byte_count"],
+                "captured_at": request["before"]["captured_at"],
+            },
+            "after": {
+                "evidence": evidence["after"],
+                "sha256": request["after"]["sha256"],
+                "byte_count": request["after"]["byte_count"],
+                "captured_at": request["after"]["captured_at"],
+            },
             "max_request_chars": detector.max_request_chars,
+            "evidence": {"normalized": True, "cap_chars": MAX_NORMALIZED_CHARS,
+                         "truncated": meta["evidence_truncated"]},
         }
         payload = json.dumps(prompt_request, ensure_ascii=False)
         raw = None
@@ -93,7 +114,7 @@ class JevCommandProvider:
                     input_bytes=len(payload.encode("utf-8")),
                     output_bytes=len(proc.stdout.encode("utf-8")),
                     schema_valid=True, error_category="none", retries=attempt - 1,
-                    usage={"command_shell": True, "timeout_s": self.timeout_s},
+                    usage={"command_shell": True, "timeout_s": self.timeout_s, **meta},
                 )
             except subprocess.TimeoutExpired:
                 last_error = "timeout"

@@ -1,5 +1,5 @@
 {
-  "lock_note": "Created before any held-out run. The implementing commit SHA is recorded in results/committed/*.json at run time.",
+  "lock_note": "Created before any held-out run. The lock pins the SHA-256 of benchmark/thresholds.json. The same threshold hash is recorded in every result artifact under results/committed/*.json (field thresholds.sha256). No implementing-commit SHA is recorded by this lock: locked_at_commit stays null until an owner sets it at release time.",
   "locked_at_commit": null,
   "locked_before_first_held_out_run": true,
   "policy": "A change to benchmark/thresholds.json after this lock invalidates the held-out evaluation; it requires an explicit issue update before the next held-out run.",

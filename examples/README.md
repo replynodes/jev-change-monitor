@@ -18,10 +18,27 @@ jev-monitor demo --detector saas_pricing
 jev-monitor demo --detector product_change
 ```
 
-Each `case.json` is a byte-for-byte copy of the named held-out fixture,
-extracted deterministically from `datasets/held_out/held-out-cases.jsonl`
-(`python3 -c "..."` extraction used `case_id` selection — see the generator
-`scripts/generate_dataset.py` for the single source of truth).
+Each `case.json` carries the *same case object* as the named held-out fixture
+(same `case_id` and every field; only the file format differs — the datasets
+are compact JSONL while the examples are pretty-printed with sorted keys, so
+the raw bytes are not byte-for-byte identical). Cases are selected
+deterministically by `case_id` from `datasets/held_out/held-out-cases.jsonl` —
+see the generator `scripts/generate_dataset.py` for the single source of
+truth. Verify object equality yourself:
+
+```sh
+python3 - <<'PY'
+import json
+for name in ("price", "saas_pricing", "product_change"):
+    cases = [json.loads(l) for l in open("datasets/held_out/held-out-cases.jsonl")
+             if l.strip()]
+    example = json.load(open(f"examples/{name}/case.json"))
+    fixture = next(c for c in cases if c["case_id"] == example["case_id"])
+    assert example == fixture, name
+    print(f"{name}/case.json == held-out fixture {example['case_id']}")
+print("examples match their held-out fixtures (object equality)")
+PY
+```
 
 ## Signed webhook example (HMAC-SHA256)
 
