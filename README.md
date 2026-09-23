@@ -49,6 +49,7 @@ jev-monitor demo --detector price             # run one example case
 jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
 jev-monitor repro-check --split held_out      # deterministic metrics are byte-stable
 jev-monitor webhook-demo                      # signed sender -> receiver roundtrip
+jev-monitor blocked-live                      # BLOCKED probe -> gitignored results/runs/
 ```
 
 Docker:
@@ -77,9 +78,13 @@ The launch thresholds from #487 are **not** passed by this repository today:
 - The local `heuristic-baseline` provider is pipeline evidence only. It is
   deliberately not Jev and never counts toward launch thresholds.
 - Without an authorized live Jev runtime (env-configured `JEV_ENDPOINT` +
-  `JEV_API_KEY` or `JEV_COMMAND` — values are never logged), the benchmark
-  writes `results/committed/blocked/live-jev-blocked.json` with
-  `launch_claim.status = "blocked"` and the exact missing capabilities.
+  `JEV_API_KEY` or `JEV_COMMAND` — values are never logged), `jev-monitor
+  blocked-live` writes a machine-readable BLOCKED artifact with
+  `launch_claim.status = "blocked"` and the exact missing capabilities. The
+  safe default is the gitignored run-local copy
+  `results/runs/live-jev-blocked.json`; the committed copy under
+  `results/committed/blocked/` is regenerated only deliberately via
+  `--committed` with an explicit `--out` under `results/committed/`.
 - Held-out labels are rubric drafts pending independent human
   review/adjudication, which is a separate launch blocker.
 

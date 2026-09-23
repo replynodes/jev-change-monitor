@@ -534,6 +534,21 @@ def cmd_blocked_live(args: argparse.Namespace) -> int:
     out = Path(args.out)
     if not out.is_absolute():
         out = REPO_ROOT / out
+    committed_root = RESULTS_COMMITTED
+    is_committed_target = out == committed_root or committed_root in out.parents
+    if is_committed_target and not args.committed:
+        return _fail(
+            f"refusing to overwrite committed artifact {display_path(out)}; "
+            "run-local output defaults to the gitignored "
+            "results/runs/live-jev-blocked.json — pass --committed with an "
+            "explicit --out under results/committed/ only to deliberately "
+            "regenerate a committed BLOCKED artifact"
+        )
+    if args.committed and not is_committed_target:
+        return _fail(
+            "--committed requires an explicit --out under results/committed/ "
+            f"(got {display_path(out)})"
+        )
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
         runner._write_json(out, artifact)  # noqa: SLF001 - shared writer
@@ -593,9 +608,24 @@ def build_parser() -> argparse.ArgumentParser:
     p_providers = sub.add_parser("providers", help="show configured live providers (no values)")
     p_providers.set_defaults(func=cmd_providers)
 
-    p_blocked = sub.add_parser("blocked-live",
-                               help="write a machine-readable BLOCKED artifact for the live Jev path")
-    p_blocked.add_argument("--out", default="results/committed/blocked/live-jev-blocked.json")
+    p_blocked = sub.add_parser(
+        "blocked-live",
+        help="write a machine-readable BLOCKED artifact for the live Jev path "
+             "(safe default: gitignored results/runs/; committed copy requires --committed)",
+    )
+    p_blocked.add_argument(
+        "--out",
+        default="results/runs/live-jev-blocked.json",
+        help=("output path; the safe default is the gitignored run-local copy "
+              "results/runs/live-jev-blocked.json; writing under "
+              "results/committed/ requires --committed"),
+    )
+    p_blocked.add_argument(
+        "--committed",
+        action="store_true",
+        help="deliberately regenerate the committed BLOCKED artifact "
+             "(requires an explicit --out under results/committed/)",
+    )
     p_blocked.set_defaults(func=cmd_blocked_live)
     return parser
 

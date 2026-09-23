@@ -19,14 +19,24 @@ python3 scripts/generate_dataset.py --check          # fixtures match the genera
 jev-monitor validate                                 # schemas, counts, thresholds, artifacts
 # Run-local output goes to the gitignored results/runs/ dir: every command in
 # this block writes there, so reproducing never rewrites the committed
-# artifacts under results/committed/. Those are only replaced by a deliberate
-# targeted regeneration (a benchmark or `blocked-live` run without --out) in
-# the change that owns them.
+# artifacts under results/committed/. A bare `blocked-live` also defaults to
+# the gitignored run-local copy; committed artifacts are replaced only by a
+# deliberate targeted regeneration (an explicit `--out` under
+# results/committed/, or `blocked-live --committed ...`) in the change that
+# owns them.
 jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
 jev-monitor benchmark --split dev --provider heuristic --out results/runs/dev-deterministic.json
 jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09 --out results/runs/held_out-deterministic-fault-injection.json
-jev-monitor blocked-live --out results/runs/live-jev-blocked.json
+jev-monitor blocked-live                              # safe default: gitignored results/runs/live-jev-blocked.json
 jev-monitor repro-check --split held_out             # deterministic metrics are byte-stable
+```
+
+A bare `jev-monitor blocked-live` refuses to write under
+`results/committed/` (exit 1). Regenerating the committed BLOCKED artifact is
+deliberate only:
+
+```sh
+jev-monitor blocked-live --committed --out results/committed/blocked/live-jev-blocked.json
 ```
 
 Artifacts exclude volatile fields (latency, timestamps, run environment) when

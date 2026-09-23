@@ -15,8 +15,15 @@ jev-monitor redact-check                              # redaction integrity + ru
 jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
 jev-monitor benchmark --split dev --provider heuristic --out results/runs/dev-deterministic.json
 jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09 --out results/runs/held_out-deterministic-fault-injection.json
-jev-monitor blocked-live --out results/runs/live-jev-blocked.json
+jev-monitor blocked-live                              # safe default: gitignored results/runs/live-jev-blocked.json
 jev-monitor repro-check --split held_out
+```
+
+A bare `blocked-live` never writes under `results/committed/` (exit 1).
+Regenerating the committed BLOCKED artifact is deliberate only:
+
+```sh
+jev-monitor blocked-live --committed --out results/committed/blocked/live-jev-blocked.json
 ```
 
 `jev-monitor validate` also proves the #487 split separation: it fingerprints
@@ -110,7 +117,9 @@ artifact.
   unverified threshold evaluation, and `launch_claim.status = "blocked"`. It
   is deliberately distinct from `live-jev` so a downstream reader keying on
   `evaluation_kind` alone can never mistake a blocked artifact for live
-  evidence.
+  evidence. The run-local copy defaults to the gitignored `results/runs/`;
+  the committed copy is regenerated only through the explicit
+  `blocked-live --committed` guard.
 
 `launch_claim.status` is `passed` **only** for a live-jev run with all checks
 green **and** `dataset.human_labeled == true` (every held-out label carries
