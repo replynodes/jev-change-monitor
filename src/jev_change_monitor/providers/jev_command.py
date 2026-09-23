@@ -10,6 +10,12 @@ chars, with `evidence.truncated` recording whether the cap dropped content.
 Raw capture HTML is not forwarded; `sha256`/`byte_count` identify the capture
 the evidence came from. Never executes page content.
 
+Execution contract: `JEV_COMMAND` is parsed with Python's POSIX `shlex` into
+an argv list and executed WITHOUT a shell (`shell=False`) — no pipes,
+redirections, globbing, or environment expansion. It must name a single
+executable plus literal arguments. A deliberate shell pipeline/expansion
+contract is not supported.
+
 Credential discipline: the value passed to the command is environment-only;
 the command string itself must not contain secrets. If `JEV_COMMAND` is
 unset, this provider reports itself as not-configured and never runs.
@@ -94,13 +100,14 @@ class JevCommandProvider:
             attempt += 1
             start = time.perf_counter()
             try:
+                argv = shlex.split(self.command)
                 proc = subprocess.run(
-                    self.command,
+                    argv,
                     input=payload,
                     capture_output=True,
                     text=True,
                     timeout=self.timeout_s,
-                    shell=True,
+                    shell=False,
                 )
                 latency_ms = (time.perf_counter() - start) * 1000.0
                 if proc.returncode != 0:
@@ -114,7 +121,7 @@ class JevCommandProvider:
                     input_bytes=len(payload.encode("utf-8")),
                     output_bytes=len(proc.stdout.encode("utf-8")),
                     schema_valid=True, error_category="none", retries=attempt - 1,
-                    usage={"command_shell": True, "timeout_s": self.timeout_s, **meta},
+                    usage={"command_shell": False, "timeout_s": self.timeout_s, **meta},
                 )
             except subprocess.TimeoutExpired:
                 last_error = "timeout"

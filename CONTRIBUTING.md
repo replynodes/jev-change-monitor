@@ -50,8 +50,10 @@ without a model. The baseline is label-blind and never launch evidence.
 
 Add your detector's gates to `benchmark/thresholds.json` **and** update
 `benchmark/thresholds.lock.json` (recompute the SHA-256) in the same commit.
-Freeze applies before the first held-out run: `jev-monitor validate --strict`
-will fail on any later drift. Explicitly state the threshold source (issue or
+Freeze applies before the first held-out run: `jev-monitor validate` runs the
+frozen-threshold check (threshold SHA-256 locked in
+`benchmark/thresholds.lock.json`) and fails on any later drift — there is no
+separate `--strict` flag. Explicitly state the threshold source (issue or
 accepted spec) in `"source_issues"`.
 
 ## 6. Verify before opening a PR

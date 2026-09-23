@@ -46,7 +46,7 @@ python3 scripts/generate_dataset.py --check   # fixtures match the generator
 jev-monitor validate                          # schemas, counts, thresholds, artifacts
 jev-monitor redact-check                      # hashes survive, secrets redacted, rubric paths resolve
 jev-monitor demo --detector price             # run one example case
-jev-monitor benchmark --split held_out --provider heuristic
+jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
 jev-monitor repro-check --split held_out      # deterministic metrics are byte-stable
 jev-monitor webhook-demo                      # signed sender -> receiver roundtrip
 ```

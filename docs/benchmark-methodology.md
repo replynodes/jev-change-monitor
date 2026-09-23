@@ -10,9 +10,11 @@ python3 scripts/generate_dataset.py --check
 
 jev-monitor validate                                  # ALL gates below
 jev-monitor redact-check                              # redaction integrity + rubric citations
-jev-monitor benchmark --split held_out --provider heuristic
-jev-monitor benchmark --split dev --provider heuristic
-jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09
+# Run-local output goes to the gitignored results/runs/ dir; committed
+# artifacts under results/committed/ are never overwritten by run commands.
+jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
+jev-monitor benchmark --split dev --provider heuristic --out results/runs/dev-deterministic.json
+jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09 --out results/runs/held_out-deterministic-fault-injection.json
 jev-monitor blocked-live
 jev-monitor repro-check --split held_out
 ```
@@ -44,6 +46,10 @@ judgement confusion matrix is reported alongside.
 - false_alert_rate = alerts on label-noise cases / noise cases
 - false_negative_rate = missed alerts / label-alert cases
 - false_change_rate (price) = predicted-meaningful on label-unchanged / unchanged
+- false_change_cases = the exact integer numerator behind each false_change_rate
+  (per detector and overall). The overall false_change_rate derives from the
+  summed per-detector exact counts — never from rounding per-detector rates —
+  so the aggregate cannot drift by per-detector rounding.
 - exact_price_accuracy = amount AND currency AND direction match
 - latency p50/p95 (ms, measured per case)
 - input volume (bytes, per detector)

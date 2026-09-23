@@ -173,6 +173,7 @@ def detector_metrics(rows: list[dict], cost_model: dict) -> dict:
 
     unchanged_rows = [r for r in evaluable if not r["label"]["meaningful"]]
     false_change = sum(1 for r in unchanged_rows if (r["result"] or {}).get("meaningful"))
+    metrics["false_change_cases"] = false_change
     metrics["false_change_rate"] = _safe_div(false_change, len(unchanged_rows))
     metrics["label_unchanged_cases"] = len(unchanged_rows)
     metrics["label_alert_cases"] = len(alert_positive_rows)
@@ -211,13 +212,13 @@ def aggregate_metrics(per_detector: dict[str, dict]) -> dict:
     if precision is not None and recall is not None and (precision + recall) > 0:
         f1 = 2 * precision * recall / (precision + recall)
 
-    # overall false-change = predicted-meaningful on label-unchanged, summed
-    false_change_count = 0
-    for metrics in per_detector.values():
-        rate = metrics.get("false_change_rate")
-        count = metrics.get("label_unchanged_cases", 0)
-        if rate is not None and count:
-            false_change_count += round(rate * count)
+    # overall false-change = exact per-detector counts summed directly. Never
+    # reconstructed from round(rate * count): each detector records the
+    # auditable integer numerator `false_change_cases`, so the aggregate cannot
+    # drift from per-detector rounding. Per-detector rates stay exact.
+    false_change_count = sum(
+        metrics.get("false_change_cases", 0) for metrics in per_detector.values()
+    )
 
     total.update({
         "primary_decision": "should_alert",

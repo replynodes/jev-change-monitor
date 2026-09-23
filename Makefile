@@ -1,4 +1,4 @@
-.PHONY: install check validate benchmark demo webhook-demo repro gate scan redact-check lint
+.PHONY: install check validate benchmark benchmark-dev benchmark-fault-injection demo webhook-demo repro gate scan redact-check lint
 
 install:
 	pip install -e .
@@ -14,11 +14,17 @@ check:
 validate: check
 	jev-monitor validate
 
+# Run-local output goes to the gitignored results/runs/ dir. Committed
+# artifacts under results/committed/ are only ever read (or gated) here —
+# never overwritten by make targets, so `git status` stays clean.
 benchmark:
-	jev-monitor benchmark --split held_out --provider heuristic
+	jev-monitor benchmark --split held_out --provider heuristic --out results/runs/held_out-deterministic.json
 
 benchmark-dev:
-	jev-monitor benchmark --split dev --provider heuristic
+	jev-monitor benchmark --split dev --provider heuristic --out results/runs/dev-deterministic.json
+
+benchmark-fault-injection:
+	jev-monitor benchmark --split held_out --provider heuristic --fault-injection-rate 0.09 --out results/runs/held_out-deterministic-fault-injection.json
 
 demo:
 	jev-monitor demo
@@ -29,6 +35,7 @@ webhook-demo:
 repro:
 	jev-monitor repro-check --split held_out
 
+# Read-only: evaluates the committed artifact against frozen thresholds.
 gate:
 	jev-monitor gate --result results/committed/heuristic-baseline/held_out-deterministic.json
 
@@ -43,5 +50,5 @@ lint:
 	@echo "compileall OK"
 
 # Full local gate suite (no live Jev needed)
-all: validate benchmark benchmark-dev repro scan redact-check lint webhook-demo
+all: validate benchmark benchmark-dev benchmark-fault-injection repro scan redact-check lint webhook-demo
 	@echo "all local gates passed"
