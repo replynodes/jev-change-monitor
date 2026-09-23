@@ -39,7 +39,7 @@ redact-check:
 	jev-monitor redact-check
 
 lint:
-	@test -z "$$(python3 -m compileall -q src scripts examples && echo dirty)" || (echo "compile check failed"; exit 1)
+	@python3 -m compileall -q src scripts examples || { echo "compile check failed"; exit 1; }
 	@echo "compileall OK"
 
 # Full local gate suite (no live Jev needed)

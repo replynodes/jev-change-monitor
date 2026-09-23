@@ -31,8 +31,9 @@ from jev_change_monitor.schemas import validate_schema
 REPO_ROOT = dataset.REPO_ROOT
 RESULTS_DIR = REPO_ROOT / "results" / "runs"
 
-VOLATILE_KEYS = ("generated_at", "runtime", "latency_ms", "latency_ms_p50",
-                 "latency_ms_p95", "artifact_sha256")
+VOLATILE_KEYS = ("generated_at", "runtime", "run_id", "environment",
+                 "latency_ms", "latency_ms_p50", "latency_ms_p95",
+                 "artifact_sha256")
 
 
 def _request_for_case(case: dict) -> dict:
@@ -133,6 +134,12 @@ def run(
         schema_errors: list[str] = []
         if response.result is not None and response.schema_valid:
             schema_errors = validate_schema(response.result, "detector-result")
+            change_type = response.result.get("change_type")
+            if change_type is not None and change_type not in detector.allowed_change_types:
+                schema_errors.append(
+                    f"change_type: {change_type!r} is not allowed for detector "
+                    f"{detector.id!r} (allowed: {', '.join(detector.allowed_change_types)})"
+                )
             if schema_errors:
                 response.schema_valid = False
                 response.error_category = "schema_invalid"

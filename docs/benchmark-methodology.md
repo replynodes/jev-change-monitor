@@ -78,6 +78,13 @@ Scores for undecidable rows (schema-invalid / provider-error) are excluded
 from precision/recall and reported in their own rates; the artifact records
 the counts.
 
+Detector-specific typing: each result's `change_type` is validated per
+detector against its `DetectorSpec.allowed_change_types`, on top of the
+global `schemas/detector-result.schema.json` union. A provider cannot emit
+another detector's type and pass validation; such a row is recorded as
+schema-invalid and counted in `schema_invalid_rate`, never measured as a
+judgement.
+
 ## Reproducibility
 
 `runner.comparable_view()` strips volatile fields (timestamps, latency, run
