@@ -50,17 +50,38 @@ Credential/endpoint discipline is identical to ``jev-http``: values are read
 from the environment only and never logged or printed; ``describe()`` reports
 only configuration flags, and failure messages never echo the endpoint URL,
 exception detail, response fragments or credential text (``redact.env_flag``).
+
+Price extraction (``price`` detector only): the typed contract has no free-form
+extraction answer, so ``details.extraction`` is modelled as three dynamic
+``choice`` questions whose criteria are derived ONLY from bounded candidate
+price tokens in the normalized BEFORE/AFTER evidence (``normalize.extract_price_tokens``),
+plus fixed sentinels. The mapper turns the chosen options deterministically
+into ``details.extraction`` (``amount``, ``currency``, ``period``,
+``amount_before``, ``currency_before``, ``direction``); a choice outside the
+derived candidate set is unmappable and recorded as ``schema_invalid`` — an
+amount is never invented. Candidate counts and a truncation flag are recorded
+in the per-case ``usage`` so the bounded-evidence limitation stays honest.
+
+Timeouts: a socket/read timeout (``URLError`` wrapping ``TimeoutError`` or a
+bare ``TimeoutError``) is classified separately as ``error_category="timeout"``
+and retried with a bounded deterministic backoff, mirroring the bounded 429
+``Retry-After`` discipline; detail stays withheld exactly like other provider
+failures. HTTP 429 remains a ``provider``-category rate-limit failure with
+bounded ``Retry-After`` handling — it is never turned into a fabricated
+semantic result.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.request
 
 from jev_change_monitor.detectors import DetectorSpec
+from jev_change_monitor.normalize import extract_price_tokens
 from jev_change_monitor.providers.base import ProviderResponse, bounded_evidence
 from jev_change_monitor.redact import env_flag
 
@@ -86,6 +107,17 @@ _CONFIDENCE_LEVELS = [
     "0.75 - high confidence",
     "1.0 - very high confidence",
 ]
+
+# Price extraction (price detector only): the typed /v1/evaluate contract has
+# no free-form extraction answer, so extraction is modelled as dynamic `choice`
+# questions whose criteria are derived ONLY from bounded candidate price tokens
+# in the normalized BEFORE/AFTER evidence plus fixed sentinels. The mapper maps
+# chosen options deterministically into `details.extraction`; a choice outside
+# the derived candidate set is unmappable and recorded as schema_invalid —
+# amounts are never invented.
+_MAX_PRICE_CANDIDATES = 8
+_PRICE_SENTINELS = ("no_price_token", "unclear")
+_PRICE_DIRECTIONS = ("up", "down", "unchanged", "unknown")
 
 
 def question_bank(detector: DetectorSpec) -> dict:
@@ -139,6 +171,174 @@ def question_bank(detector: DetectorSpec) -> dict:
             "criteria": _CONFIDENCE_LEVELS,
         },
     }
+
+
+def _price_token_key(token: dict) -> str:
+    """Deterministic candidate key for a price token (exact round-trip).
+
+    The key is the choice VALUE the gateway returns; the mapper looks the key
+    up in the bounded candidate map, so the amount is never re-parsed and can
+    never be fabricated.
+    """
+    amount = format(token["amount"], ".10g")
+    currency = (token.get("currency") or "none").upper()
+    period = (token.get("period") or "none").lower()
+    return f"amt:{amount}|cur:{currency}|per:{period}"
+
+
+def _bounded_price_candidates(tokens: list[dict]) -> tuple[dict, bool]:
+    """Bound/dedupe candidate price tokens: key -> {amount, currency, period}.
+
+    Document order is preserved; the candidate set is capped at
+    _MAX_PRICE_CANDIDATES and the truncation flag is recorded in the per-case
+    usage so the bounded-evidence limitation stays honest.
+    """
+    out: dict = {}
+    truncated = False
+    for token in tokens:
+        key = _price_token_key(token)
+        if key in out:
+            continue
+        if len(out) >= _MAX_PRICE_CANDIDATES:
+            truncated = True
+            break
+        out[key] = {
+            "amount": token["amount"],
+            "currency": token.get("currency"),
+            "period": token.get("period"),
+        }
+    return out, truncated
+
+
+def _price_criteria(candidates: dict) -> dict:
+    """Criteria descriptions for the price token choice questions.
+
+    Descriptions are built only from bounded candidate fields (never raw page
+    text), plus the fixed sentinel descriptions.
+    """
+    criteria = {}
+    for key, candidate in candidates.items():
+        currency = f" {candidate['currency']}" if candidate.get("currency") else " (no currency code)"
+        period = f" per {candidate['period']}" if candidate.get("period") else " (no period)"
+        criteria[key] = f"price token with amount {candidate['amount']}{currency}{period}"
+    criteria["no_price_token"] = "no price token is present for this side of the evidence"
+    criteria["unclear"] = "a product price cannot be determined from this side of the evidence"
+    return criteria
+
+
+def price_extraction_questions(evidence: dict) -> tuple[dict, dict]:
+    """Price-detector extraction questions: dynamic choice criteria.
+
+    Returns ``(questions, context)`` where ``context`` carries the bounded
+    candidate maps (``after``/``before``: key -> {amount, currency, period})
+    plus a ``truncated`` flag. The choice criteria derive ONLY from
+    ``normalize.extract_price_tokens`` over the bounded, normalized evidence —
+    never from raw page content. ``context`` is passed to ``map_answers`` so
+    the mapping stays deterministic and cannot invent values.
+    """
+    before_candidates, before_trunc = _bounded_price_candidates(
+        extract_price_tokens(evidence.get("before", ""))
+    )
+    after_candidates, after_trunc = _bounded_price_candidates(
+        extract_price_tokens(evidence.get("after", ""))
+    )
+    questions = {
+        "price_after": {
+            "type": "choice",
+            "instructions": (
+                "Choose the price token that best represents the CURRENT "
+                "AFTER-state product/plan price, considering the currency and "
+                "billing period. Ignore shipping thresholds, list numbers, "
+                "years and unrelated figures. Choose 'no_price_token' when "
+                "the AFTER state carries no product price and 'unclear' when "
+                "the evidence is ambiguous."
+            ),
+            "criteria": _price_criteria(after_candidates),
+        },
+        "price_before": {
+            "type": "choice",
+            "instructions": (
+                "Choose the price token that best represented the product/plan "
+                "price in the BEFORE state, considering the currency and "
+                "billing period. Ignore shipping thresholds, list numbers, "
+                "years and unrelated figures. Choose 'no_price_token' when "
+                "the BEFORE state carried no product price and 'unclear' when "
+                "the evidence is ambiguous."
+            ),
+            "criteria": _price_criteria(before_candidates),
+        },
+        "price_direction": {
+            "type": "choice",
+            "instructions": (
+                "Did the product/plan price go up, down, stay unchanged, or is "
+                "it unknown? Base this on the BEFORE and AFTER price tokens you "
+                "selected."
+            ),
+            "criteria": {
+                "up": "the price increased",
+                "down": "the price decreased",
+                "unchanged": "the price stayed the same",
+                "unknown": "the direction cannot be determined",
+            },
+        },
+    }
+    return questions, {
+        "after": after_candidates,
+        "before": before_candidates,
+        "truncated": before_trunc or after_trunc,
+    }
+
+
+def _map_price_extraction(answers: dict, price_extraction: dict) -> tuple[dict | None, list[str]]:
+    """Deterministic mapping of typed price extraction answers.
+
+    Each answer must be a ``choice`` whose value is either one of the bounded
+    candidate keys for that side or a fixed sentinel; a value outside the
+    allowed set is unmappable and yields an error naming the answer id —
+    amounts are never invented. Sentinels map to null amount/currency/period
+    (honest "no token / unclear" evidence) and never fabricate numbers.
+    """
+    errors: list[str] = []
+    after_candidates = price_extraction.get("after") or {}
+    before_candidates = price_extraction.get("before") or {}
+
+    after_value, after_err = _choice_value(
+        answers.get("price_after") or {},
+        tuple(after_candidates) + _PRICE_SENTINELS,
+    )
+    if after_err:
+        errors.append("answer price_after: " + after_err)
+    before_value, before_err = _choice_value(
+        answers.get("price_before") or {},
+        tuple(before_candidates) + _PRICE_SENTINELS,
+    )
+    if before_err:
+        errors.append("answer price_before: " + before_err)
+    direction, direction_err = _choice_value(
+        answers.get("price_direction") or {}, _PRICE_DIRECTIONS
+    )
+    if direction_err:
+        errors.append("answer price_direction: " + direction_err)
+    if errors:
+        return None, errors
+    # `_choice_value` returned no error above, so every value is non-None.
+    assert after_value is not None and before_value is not None and direction is not None
+
+    def token_fields(candidates: dict, value: str) -> dict:
+        if value in _PRICE_SENTINELS:
+            return {"amount": None, "currency": None, "period": None}
+        return candidates[value]
+
+    after = token_fields(after_candidates, after_value)
+    before = token_fields(before_candidates, before_value)
+    return {
+        "amount": after["amount"],
+        "currency": after["currency"],
+        "period": after["period"],
+        "amount_before": before["amount"],
+        "currency_before": before["currency"],
+        "direction": direction,
+    }, []
 
 
 def _typed_answers(payload: dict) -> tuple[dict, str | None]:
@@ -287,7 +487,18 @@ def _bounded_retry_after(exc, default: float = 1.0, cap: float = 60.0) -> float:
     return default
 
 
-def map_answers(payload: dict, detector: DetectorSpec, meta: dict) -> ProviderResponse:
+def _bounded_timeout_backoff(attempt: int, cap: float = 8.0) -> float:
+    """Bounded deterministic backoff for socket/read timeouts, in seconds.
+
+    Mirrors the bounded 429 Retry-After discipline: exponential (1s, 2s, 4s,
+    ...) without jitter, capped, so a timeout is retried only when retries
+    remain and the sleep can never unboundedly delay the run.
+    """
+    return min(2 ** (attempt - 1), cap)
+
+
+def map_answers(payload: dict, detector: DetectorSpec, meta: dict,
+                price_extraction: dict | None = None) -> ProviderResponse:
     """Map a typed /v1/evaluate response into a detector-result contraction.
 
     Pure and deterministic (used by the redact-check contract probe and by
@@ -295,6 +506,14 @@ def map_answers(payload: dict, detector: DetectorSpec, meta: dict) -> ProviderRe
     mapped safely yields a `schema_valid=False` ProviderResponse with a
     bounded `provider_error` naming the failing answer id/rule (no raw
     response text, no endpoint detail).
+
+    `price_extraction` is the bounded candidate context produced by
+    `price_extraction_questions` (price detector only). When present, the
+    three extraction answers are required and mapped deterministically into
+    `details.extraction`; an unmappable choice is `schema_invalid` (an amount
+    is never invented). A price payload that carries extraction answers
+    without a candidate context is a wiring bug and fails instead of silently
+    dropping the extraction.
     """
     answers, err = _typed_answers(payload)
     if err:
@@ -351,6 +570,21 @@ def map_answers(payload: dict, detector: DetectorSpec, meta: dict) -> ProviderRe
     if confidence is None:
         errors.append("answer confidence: no raw probability or score confidence available")
 
+    # Price extraction (price detector only): when a bounded candidate context
+    # is available, the three extraction answers are required and mapped
+    # deterministically into details.extraction. An unmappable answer fails the
+    # whole result (schema_invalid, never a fabricated amount). A price payload
+    # that carries extraction answers without a candidate context is a wiring
+    # bug: fail rather than silently drop the extraction.
+    extraction: dict | None = None
+    if detector.id == "price":
+        requested = any(aid in answers for aid in ("price_after", "price_before", "price_direction"))
+        if requested and price_extraction is None:
+            errors.append("price extraction answers present but candidate context is unavailable")
+        elif price_extraction is not None:
+            extraction, extraction_errors = _map_price_extraction(answers, price_extraction)
+            errors.extend(extraction_errors)
+
     if errors:
         return ProviderResponse(
             provider="jev-evaluate", mode="live", result=None, raw=None,
@@ -365,6 +599,17 @@ def map_answers(payload: dict, detector: DetectorSpec, meta: dict) -> ProviderRe
     change_type, _ = mapped["change_type"]
     importance, _ = mapped["importance"]
 
+    details: dict = {
+        "protocol": "evaluate",
+        "answers": {
+            aid: _bounded_answer(answer)
+            for aid, answer in answers.items()
+            if isinstance(answer, dict)
+        },
+    }
+    if extraction is not None:
+        details["extraction"] = extraction
+
     result = {
         "valid": valid,
         "meaningful": meaningful,
@@ -378,14 +623,7 @@ def map_answers(payload: dict, detector: DetectorSpec, meta: dict) -> ProviderRe
             f"change_type={change_type}, "
             f"should_alert={str(should_alert).lower()}."
         ),
-        "details": {
-            "protocol": "evaluate",
-            "answers": {
-                aid: _bounded_answer(answer)
-                for aid, answer in answers.items()
-                if isinstance(answer, dict)
-            },
-        },
+        "details": details,
         "signals": {"truncated_input": bool(meta.get("evidence_truncated"))},
     }
     usage = {
@@ -425,7 +663,16 @@ class JevEvaluateProvider:
     def configured(self) -> bool:
         return self.protocol_mismatch is None and bool(self.endpoint and self.api_key)
 
-    def _request_body(self, detector: DetectorSpec, request: dict) -> tuple[dict, dict]:
+    def _request_body(self, detector: DetectorSpec, request: dict) -> tuple[dict, dict, dict | None]:
+        """Build the /v1/evaluate request body, usage meta and price context.
+
+        Returns ``(body, meta, price_extraction)``: the third element is the
+        bounded price candidate context for the price detector (None for the
+        other detectors), used by ``map_answers`` so extraction mapping stays
+        deterministic and never invents amounts. Candidate counts and the
+        truncation flag travel in ``meta`` so the artifact records the
+        bounded-evidence limitation.
+        """
         evidence, meta = bounded_evidence(request)
         # Verified gateway contract: /v1/evaluate takes `state` as a STRING.
         # We send only the bounded, normalized BEFORE/AFTER evidence (never raw
@@ -435,11 +682,19 @@ class JevEvaluateProvider:
             "BEFORE (normalized):\n" + evidence["before"]
             + "\n\nAFTER (normalized):\n" + evidence["after"]
         )
+        questions = question_bank(detector)
+        price_extraction = None
+        if detector.id == "price":
+            extraction_questions, price_extraction = price_extraction_questions(evidence)
+            questions.update(extraction_questions)
+            meta["price_candidates_after"] = len(price_extraction["after"])
+            meta["price_candidates_before"] = len(price_extraction["before"])
+            meta["price_candidates_truncated"] = bool(price_extraction["truncated"])
         return {
             "model": self.model or detector.id,
             "state": state,
-            "questions": question_bank(detector),
-        }, meta
+            "questions": questions,
+        }, meta, price_extraction
 
     def judge(self, detector: DetectorSpec, request: dict) -> ProviderResponse:
         mismatch = self.protocol_mismatch
@@ -456,7 +711,7 @@ class JevEvaluateProvider:
                 error_category="provider",
                 provider_error="JEV_ENDPOINT/JEV_API_KEY not configured (JEV_PROTOCOL must be unset or 'evaluate')",
             )
-        request_body, meta = self._request_body(detector, request)
+        request_body, meta, price_extraction = self._request_body(detector, request)
         body = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(
             self.endpoint,
@@ -467,6 +722,7 @@ class JevEvaluateProvider:
         )
         attempt = 0
         last_error = None
+        last_category = "provider"
         while attempt <= self.retries:
             attempt += 1
             start = time.perf_counter()
@@ -474,7 +730,7 @@ class JevEvaluateProvider:
                 with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
                     latency_ms = (time.perf_counter() - start) * 1000.0
                     payload = json.loads(resp.read().decode("utf-8"))
-                response = map_answers(payload, detector, meta)
+                response = map_answers(payload, detector, meta, price_extraction)
                 response.latency_ms = latency_ms
                 response.input_bytes = len(body)
                 if self.model:
@@ -483,22 +739,48 @@ class JevEvaluateProvider:
             except urllib.error.HTTPError as exc:
                 # Bounded: status code only; never the URL or response body.
                 # HTTP 429 (rate limit) is retried with a bounded Retry-After
-                # backoff (never an immediate burst re-send).
+                # backoff (never an immediate burst re-send) and keeps
+                # error_category "provider" so rate-limit metrics stay wired.
+                last_category = "provider"
                 if exc.code == 429 and attempt <= self.retries:
                     time.sleep(_bounded_retry_after(exc))
                     last_error = "HTTP 429"
                     continue
                 last_error = f"HTTP {exc.code}"
-            except urllib.error.URLError:
-                # `reason` can echo the configured JEV_ENDPOINT, so detail is
-                # withheld exactly like jev-http/jev-command.
-                last_error = "URLError (details withheld)"
+            except urllib.error.URLError as exc:
+                # A socket/read timeout (URLError wrapping TimeoutError) is a
+                # distinct failure class: classified `timeout` and retried with
+                # a bounded backoff. Other connection failures stay provider
+                # errors; `reason` can echo the configured JEV_ENDPOINT, so
+                # detail is withheld exactly like jev-http/jev-command.
+                if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                    if attempt <= self.retries:
+                        time.sleep(_bounded_timeout_backoff(attempt))
+                        last_error = "timeout"
+                        last_category = "timeout"
+                        continue
+                    last_error = "timeout (details withheld)"
+                    last_category = "timeout"
+                else:
+                    last_error = "URLError (details withheld)"
+                    last_category = "provider"
+            except TimeoutError:
+                # Direct socket/read timeout (socket.timeout is TimeoutError on
+                # Python 3.10+); keep the same bounded retry/backoff.
+                if attempt <= self.retries:
+                    time.sleep(_bounded_timeout_backoff(attempt))
+                    last_error = "timeout"
+                    last_category = "timeout"
+                    continue
+                last_error = "timeout (details withheld)"
+                last_category = "timeout"
             except Exception as exc:  # noqa: BLE001 - normalize provider failure
                 last_error = f"{type(exc).__name__} (details withheld)"
+                last_category = "provider"
         return ProviderResponse(
             provider=self.name, mode=self.mode, result=None, raw=None,
             latency_ms=0.0, input_bytes=len(body), output_bytes=0,
-            schema_valid=False, error_category="provider", provider_error=last_error,
+            schema_valid=False, error_category=last_category, provider_error=last_error,
             retries=attempt - 1,
         )
 

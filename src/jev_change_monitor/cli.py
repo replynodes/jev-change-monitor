@@ -164,7 +164,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if not integrity_problems:
         print("  ok  hash fields byte-exact; full secret tokens absent (safe prefix + "
               "[REDACTED] only); rubric paths resolve; JEV_COMMAND values and JEV_HTTP / "
-              "JEV_EVALUATE endpoint detail never persist")
+              "JEV_EVALUATE endpoint detail never persist; price-extraction mapping and "
+              "socket/read-timeout classification probes pass")
 
     if problems:
         print("\n".join(f"  - {p}" for p in problems))
@@ -310,7 +311,8 @@ def cmd_redact_check(args: argparse.Namespace) -> int:
         return _fail(f"{len(problems)} integrity problem(s)")
     print("redact-check: PASS (hash fields byte-exact; full secret tokens absent — safe "
           "prefix + [REDACTED] only; rubric paths resolve; JEV_COMMAND values and "
-          "JEV_HTTP / JEV_EVALUATE endpoint detail never persist)")
+          "JEV_HTTP / JEV_EVALUATE endpoint detail never persist; price-extraction "
+          "mapping and socket/read-timeout classification probes pass)")
     return 0
 
 

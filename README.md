@@ -70,8 +70,15 @@ with bounded normalized before/after state and detector-specific typed
 questions. Typed answers (`boolean`/`noul`/`choice`/`score`) map into
 `schemas/detector-result.schema.json`; an answer that cannot be mapped safely
 is recorded as `schema_invalid`/`provider` error rather than fabricating
-fields (see `docs/benchmark-methodology.md`). `jev-http` remains the
-chat-completions protocol and refuses to run when `JEV_PROTOCOL=evaluate`.
+fields (see `docs/benchmark-methodology.md`). For the `price` detector the
+provider adds three dynamic `choice` extraction questions whose criteria come
+only from bounded candidate price tokens in the normalized evidence, and maps
+them deterministically into the required `details.extraction` (`amount`,
+`currency`, `period`, `amount_before`, `currency_before`, `direction`) — an
+amount is never invented. Socket/read timeouts are classified separately as
+`timeout` with bounded backoff; HTTP 429 stays a bounded rate-limit provider
+error. `jev-http` remains the chat-completions protocol and refuses to run
+when `JEV_PROTOCOL=evaluate`.
 
 Docker:
 
@@ -108,6 +115,15 @@ The launch thresholds from #487 are **not** passed by this repository today:
   `--committed` with an explicit `--out` under `results/committed/`.
 - Held-out labels are rubric drafts pending independent human
   review/adjudication, which is a separate launch blocker.
+- Live `jev-evaluate` held-out runs observe real metrics but do not meet the
+  frozen #487 thresholds, so `launch_claim.status` stays `failed` — never
+  `passed`. The most recent run (gitignored `results/runs/live-jev-*.json`)
+  measured price `exact_price_accuracy` 0.886 below the 0.95 gate over the
+  exact 35-row extraction denominator, plus a price `false_change_rate` and a
+  saas_pricing `false_alert_rate` above their caps. When the gateway
+  rate-limits a run, the bounded HTTP 429 cases stay provider-error rows with
+  capped `Retry-After` backoff — never fake semantic results — and the
+  artifact records the evaluable subset explicitly.
 
 `jev-monitor gate --result <artifact>` tells you the launch claim for any
 artifact and refuses `PASS` while any launch blocker (missing live Jev run,

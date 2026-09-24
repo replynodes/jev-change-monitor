@@ -162,8 +162,11 @@ Authorization: Bearer {JEV_API_KEY}
   `type` + `instructions` (choice adds a `criteria` map of option->description,
   score adds an ordered `criteria` array of 2-10 level descriptions). The live
   gateway accepts the `boolean` question type for binary decisions (the noul
-  family); `choice` and `score` complete the official type set. Content is
-  static, built only from the committed DetectorSpec — never from page text.
+  family); `choice` and `score` complete the official type set. Base question
+  content is static, built only from the committed DetectorSpec — never from
+  page text. The price detector additionally carries three dynamic extraction
+  `choice` questions whose criteria derive ONLY from the bounded candidate
+  price tokens of the evidence (see "Price extraction" below).
 - The endpoint answers with a typed answers map. The gateway renders the
   boolean/noul family as `{"type": "boolean", "probability": 0.85}` (verified
   live contract); the native System One endpoint renders it as
@@ -180,6 +183,39 @@ Typed-answer mapping into `schemas/detector-result.schema.json`:
 | `change_type` (choice) | `change_type` | chosen option must be inside the detector's `allowed_change_types`; otherwise unmappable |
 | `importance` (choice) | `importance` | chosen option must be `low`/`medium`/`high` |
 | `confidence` (raw probability) | `confidence` | the raw `probability`/`noul` of the `should_alert` answer, else the `meaningful` answer; else the `confidence` reported on the score question answer — all in [0,1] |
+| `price_after` / `price_before` (choice, price only) | `details.extraction` amount/currency/period per side | chosen option must be a bounded candidate token key for that side or a fixed sentinel (`no_price_token` / `unclear`); sentinels map to `null` fields; anything else is unmappable |
+| `price_direction` (choice, price only) | `details.extraction.direction` | chosen option must be `up` / `down` / `unchanged` / `unknown` |
+
+### Price extraction via typed choices
+
+The typed `/v1/evaluate` contract has no free-form extraction answer, so the
+price detector's `details.extraction` (required by the detector contract —
+`docs/detector-contracts.md`) is modelled as three dynamic `choice` questions.
+Their criteria are derived **only** from bounded candidate price tokens
+(`normalize.extract_price_tokens` over the bounded 64,000-char normalized
+BEFORE/AFTER evidence, deduplicated, capped at 8 candidates per side, plus the
+fixed sentinels `no_price_token` / `unclear`). Candidate counts and a
+truncation flag are recorded in the per-case `usage`
+(`price_candidates_after`, `price_candidates_before`,
+`price_candidates_truncated`) so the bounded-evidence limitation stays honest.
+
+`map_answers` turns the chosen options deterministically into
+`details.extraction`:
+
+```
+amount, currency, period,            (from price_after)
+amount_before, currency_before,      (from price_before)
+direction  (up | down | unchanged | unknown)
+```
+
+A chosen option that is **not** in the bounded candidate set for that side (an
+invented amount) is unmappable and recorded as `schema_invalid` naming the
+failing answer id — an amount is never computed, guessed or fabricated. The
+sentinel `no_price_token` / `unclear` map to `null` amount/currency/period
+(honest "no token / unclear" evidence). This preserves the exact-price
+denominator (`price_cases_with_expectation` — see "Price accuracy denominator"
+above): every evaluable price case with `expected.price` is now actually
+compared against a real extraction instead of an empty one.
 
 `confidence_source` is always `jev-raw-probability` for this provider (raw
 uncalibrated probability semantics, docs/detector-contracts.md). The result
@@ -202,7 +238,14 @@ categories (e.g. `HTTP 400`) and withheld-detail type names are recorded.
 HTTP 429 (rate limit) is retried with a bounded `Retry-After` backoff (header
 value capped at 60s, 1s default when absent) instead of an immediate burst
 re-send; when retries are exhausted the case records `provider_error =
-"HTTP 429"` only.
+"HTTP 429"` only, keeping `error_category = "provider"` so rate-limit metrics
+stay wired. A socket/read timeout (`URLError` wrapping `TimeoutError`, or a
+bare `TimeoutError`) is classified separately as
+`error_category = "timeout"` and retried with a bounded deterministic
+exponential backoff (1s, 2s, 4s, capped at 8s) — never a fabricated semantic
+result; endpoint/key/error detail stays withheld (`"timeout (details
+withheld)"`). Both retry loops are capped by the provider's `retries` setting
+and record the exhausted `retries` count truthfully.
 
 Run-local live runs write to the gitignored `results/runs/` (e.g.
 `results/runs/live-jev-dev.json`); committed artifacts are never overwritten.

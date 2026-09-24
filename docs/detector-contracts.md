@@ -93,7 +93,14 @@ Captured page content is untrusted input and is never executed or trusted:
   maps typed answers (`boolean`/`noul`/`choice`/`score`) into the
   detector-result contract; unmappable answers are recorded as
   `schema_invalid`/`provider` error, never fabricated (see
-  docs/benchmark-methodology.md).
+  docs/benchmark-methodology.md). For the `price` detector the provider adds
+  three dynamic `choice` extraction questions (criteria derived only from
+  bounded candidate price tokens in the normalized evidence) and maps them
+  deterministically into the required `details.extraction`
+  (`amount`/`currency`/`period`/`amount_before`/`currency_before`/`direction`);
+  a choice outside the derived candidate set is unmappable — amounts are never
+  invented. Socket/read timeouts are classified `timeout` with bounded
+  backoff, distinct from provider errors.
 
 Live results must record `confidence_source = "jev-raw-probability"`.
 Without an authorized Jev runtime the benchmark emits a machine-readable

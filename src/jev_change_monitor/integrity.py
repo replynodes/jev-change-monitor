@@ -33,6 +33,20 @@ These are integration/repro checks over the *committed* tree, not unit tests:
    exception detail, or credential text — while keeping
    `error_category = \"provider\"` so provider-error metrics stay wired.
    Loopback port 1 keeps the probe deterministic and network-free.
+6. Price extraction mapping — the `price` detector's dynamic `choice`
+   extraction questions must derive their criteria from the actual bounded
+   candidate price tokens of the committed example (`examples/price/case.json`),
+   the three answers must map deterministically into a schema-valid
+   `details.extraction`, unmappable choices / missing contexts must fail as
+   `schema_invalid` with the failing answer id named (amounts never
+   invented), sentinels map to null extraction fields, and non-price
+   detectors must never emit `details.extraction`. Pure `map_answers`, no
+   network.
+7. Timeout classification — a real socket read timeout against a local
+   loopback server that accepts and stalls must be classified
+   `error_category = \"timeout\"` with a bounded withheld `provider_error`,
+   bounded retry/backoff, and never a fabricated result; endpoint/credential
+   fragments must not leak. Loopback-only and deterministic.
 
 `jev-monitor validate` runs the same checks; `jev-monitor redact-check` is the
 standalone deterministic entry point.
@@ -678,6 +692,297 @@ def evaluate_provider_probe() -> list[str]:
     return problems
 
 
+def extraction_mapping_probe() -> list[str]:
+    """Deterministic price-extraction mapping probe (pure, no network).
+
+    Mirrors `evaluate_provider_probe`'s pure `map_answers` section for the P2
+    price-extraction contract: builds the bounded candidate context exactly as
+    the live path does from the committed `examples/price/case.json`, then
+    proves:
+
+    1. question bank wiring — the price detector carries the three typed
+       `choice` extraction questions (`price_after` / `price_before` /
+       `price_direction`) and their criteria derive from the actual candidate
+       price tokens in the bounded evidence plus the fixed sentinels; non-price
+       detectors carry none of them;
+    2. deterministic mapping — a fully-typed answers payload maps to a
+       schema-valid result whose `details.extraction` carries exactly the
+       chosen candidate fields plus the direction, never invented; two runs are
+       byte-identical; usage records the bounded candidate counts;
+    3. failure discipline — a choice outside the bounded candidate set or a
+       missing `price_direction` is `schema_invalid` with the failing answer id
+       named and `result=None`; sentinel choices map to null extraction fields;
+       a price payload with extraction answers but no candidate context fails
+       instead of silently dropping the extraction;
+    4. non-price detectors never emit `details.extraction`.
+    """
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.normalize import extract_price_tokens
+    from jev_change_monitor.providers.base import bounded_evidence
+    from jev_change_monitor.providers.jev_evaluate import (
+        _MAX_PRICE_CANDIDATES,
+        _price_token_key,
+        map_answers,
+        price_extraction_questions,
+        question_bank,
+    )
+    from jev_change_monitor.schemas import validate_schema
+
+    problems: list[str] = []
+    case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+    request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+    evidence, _ = bounded_evidence(request)
+    questions, context = price_extraction_questions(evidence)
+
+    # --- 1. question bank wiring -----------------------------------------
+    for qid in ("price_after", "price_before", "price_direction"):
+        question = questions.get(qid)
+        if question is None or question.get("type") != "choice":
+            problems.append(f"extraction probe: price question {qid!r} must be a choice")
+            continue
+        criteria = question.get("criteria") or {}
+        if qid != "price_direction" and not all(s in criteria for s in ("no_price_token", "unclear")):
+            problems.append(f"extraction probe: {qid} criteria must include the fixed sentinels")
+    non_price = question_bank(get_detector("saas_pricing"))
+    if any(qid.startswith("price_") for qid in non_price):
+        problems.append("extraction probe: non-price detector carries price extraction questions")
+
+    # criteria must derive from the actual bounded candidate tokens
+    for side in ("before", "after"):
+        keys: set[str] = set()
+        seen: set[str] = set()
+        for token in extract_price_tokens(evidence[side]):
+            key = _price_token_key(token)
+            if key in seen:
+                continue
+            seen.add(key)
+            if len(keys) >= _MAX_PRICE_CANDIDATES:
+                break
+            keys.add(key)
+        qid = "price_after" if side == "after" else "price_before"
+        criteria = set((questions.get(qid) or {}).get("criteria") or {})
+        missing = keys - criteria
+        if missing:
+            problems.append(f"extraction probe: {side} candidate keys missing from criteria: {sorted(missing)[:3]}")
+        context_keys = set((context.get(side) or {}).keys())
+        if not keys.issubset(context_keys):
+            problems.append(f"extraction probe: {side} candidate context does not cover the criteria")
+    # the committed example's canonical tokens ($39 after, $29 before)
+    after_criteria = set((questions.get("price_after") or {}).get("criteria") or {})
+    before_criteria = set((questions.get("price_before") or {}).get("criteria") or {})
+    if "amt:39|cur:USD|per:mo" not in after_criteria:
+        problems.append("extraction probe: after-state $39 token missing from criteria")
+    if "amt:29|cur:USD|per:mo" not in before_criteria:
+        problems.append("extraction probe: before-state $29 token missing from criteria")
+    direction_criteria = set((questions.get("price_direction") or {}).get("criteria") or {})
+    if direction_criteria != {"up", "down", "unchanged", "unknown"}:
+        problems.append("extraction probe: price_direction criteria must be exactly up/down/unchanged/unknown")
+
+    probe_meta = {
+        "evidence_normalized": True,
+        "evidence_truncated": False,
+        "evidence_cap_chars": 64000,
+        "price_candidates_after": len(context["after"]),
+        "price_candidates_before": len(context["before"]),
+        "price_candidates_truncated": bool(context["truncated"]),
+    }
+
+    def base_answers(**overrides) -> dict:
+        answers = {
+            "valid": {"type": "boolean", "value": True},
+            "meaningful": {"type": "boolean", "value": True},
+            "change_type": {"type": "choice", "value": "price_increase"},
+            "importance": {"type": "choice", "value": "high"},
+            "should_alert": {"type": "boolean", "value": True},
+            "confidence": {"type": "score", "score": 3.0, "confidence": 0.8},
+        }
+        answers.update(overrides)
+        return answers
+
+    ok_payload = {"answers": base_answers(
+        price_after={"type": "choice", "choice": "amt:39|cur:USD|per:mo"},
+        price_before={"type": "choice", "choice": "amt:29|cur:USD|per:mo"},
+        price_direction={"type": "choice", "choice": "up"},
+    )}
+
+    # --- 2. deterministic mapping into details.extraction ----------------
+    ok = map_answers(ok_payload, get_detector("price"), probe_meta, price_extraction=context)
+    if not ok.schema_valid or ok.error_category != "none" or ok.result is None:
+        problems.append(f"extraction probe: fully-typed price payload must map cleanly: {ok.provider_error!r}")
+    else:
+        extraction = ok.result.get("details", {}).get("extraction")
+        expected = {"amount": 39.0, "currency": "USD", "period": "mo",
+                    "amount_before": 29.0, "currency_before": "USD", "direction": "up"}
+        if extraction != expected:
+            problems.append(f"extraction probe: mapping produced {extraction!r}, expected {expected!r}")
+        schema_errors = validate_schema(ok.result, "detector-result")
+        if schema_errors:
+            problems.append(f"extraction probe: mapped result schema-invalid: {'; '.join(schema_errors)}")
+    again = map_answers(ok_payload, get_detector("price"), probe_meta, price_extraction=context)
+    if json.dumps(ok.result, sort_keys=True) != json.dumps(again.result, sort_keys=True):
+        problems.append("extraction probe: mapping is not deterministic")
+    if ok.usage.get("price_candidates_after") != len(context["after"]):
+        problems.append("extraction probe: usage must record the bounded after-candidate count")
+
+    # --- 3. unmappable / sentinel / wiring guard -------------------------
+    unmappable_cases = [
+        ("choice outside the bounded candidate set",
+         {"price_after": {"type": "choice", "value": "amt:999.0|cur:USD|per:none"}},
+         "price_after"),
+        ("missing price_direction",
+         {"price_after": {"type": "choice", "value": "amt:39|cur:USD|per:mo"},
+          "price_before": {"type": "choice", "value": "amt:29|cur:USD|per:mo"}},
+         "price_direction"),
+    ]
+    for name, overrides, token in unmappable_cases:
+        got = map_answers({"answers": base_answers(**overrides)}, get_detector("price"),
+                          probe_meta, price_extraction=context)
+        if got.schema_valid is not False or got.error_category != "schema_invalid":
+            problems.append(f"extraction probe: {name} must record schema_invalid")
+        if got.result is not None:
+            problems.append(f"extraction probe: {name} must NOT fabricate a result")
+        if token not in (got.provider_error or ""):
+            problems.append(
+                f"extraction probe: {name} provider_error must name {token!r}, got {got.provider_error!r}"
+            )
+
+    sentinel_payload = {"answers": base_answers(
+        meaningful={"type": "boolean", "value": False},
+        change_type={"type": "choice", "value": "none"},
+        importance={"type": "choice", "value": "low"},
+        should_alert={"type": "boolean", "value": False},
+        price_after={"type": "choice", "value": "no_price_token"},
+        price_before={"type": "choice", "value": "no_price_token"},
+        price_direction={"type": "choice", "value": "unknown"},
+    )}
+    sentinel = map_answers(sentinel_payload, get_detector("price"), probe_meta, price_extraction=context)
+    if not sentinel.schema_valid or sentinel.result is None:
+        problems.append("extraction probe: sentinel-only payload must map cleanly")
+    else:
+        extraction = sentinel.result.get("details", {}).get("extraction")
+        if extraction != {"amount": None, "currency": None, "period": None,
+                          "amount_before": None, "currency_before": None, "direction": "unknown"}:
+            problems.append(f"extraction probe: sentinel mapping unexpected: {extraction!r}")
+
+    guard = map_answers(ok_payload, get_detector("price"), probe_meta)
+    if guard.schema_valid is not False or "candidate context is unavailable" not in (guard.provider_error or ""):
+        problems.append("extraction probe: price answers without a candidate context must fail")
+
+    # --- 4. non-price detectors never emit extraction ---------------------
+    saas_payload = {"answers": {
+        "valid": {"type": "boolean", "value": True},
+        "meaningful": {"type": "boolean", "value": False},
+        "change_type": {"type": "choice", "value": "none"},
+        "importance": {"type": "choice", "value": "low"},
+        "should_alert": {"type": "boolean", "value": False},
+        "confidence": {"type": "score", "score": 2.0, "confidence": 0.6},
+    }}
+    saas = map_answers(saas_payload, get_detector("saas_pricing"), probe_meta)
+    if (saas.result or {}).get("details", {}).get("extraction") is not None:
+        problems.append("extraction probe: non-price detectors must not emit details.extraction")
+    return problems
+
+
+def timeout_classification_probe() -> list[str]:
+    """Deterministic socket/read-timeout classification probe (loopback only).
+
+    A local TCP server accepts the provider's POST and then stalls (never
+    responds), forcing a real socket read timeout with a short client timeout.
+    `JevEvaluateProvider.judge` must classify the failure as
+    `error_category = \"timeout\"`, keep a bounded withheld `provider_error`
+    (no endpoint host, no credential text), never fabricate a result, and
+    report the exhausted retry count. `retries=1` exercises the bounded
+    retry/backoff path (two attempts, both timing out). The server is
+    loopback-only, so the probe never touches the external network.
+    """
+    import os
+    import socket
+    import threading
+    import time
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_evaluate import JevEvaluateProvider
+
+    problems: list[str] = []
+    case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+    request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL", "JEV_PROTOCOL")}
+    listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listen_sock.bind(("127.0.0.1", 0))
+        listen_sock.listen(4)
+        port = listen_sock.getsockname()[1]
+        os.environ["JEV_ENDPOINT"] = f"http://127.0.0.1:{port}/v1/evaluate"
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+
+        def stall_accept() -> None:
+            """Accept up to 3 connections; never respond to any of them."""
+            for _ in range(3):
+                try:
+                    conn, _addr = listen_sock.accept()
+                except OSError:
+                    return
+
+                def drain(c: socket.socket) -> None:
+                    try:
+                        c.settimeout(2.0)
+                        try:
+                            while c.recv(65536):
+                                pass
+                        except OSError:
+                            pass
+                        time.sleep(4.0)
+                    except OSError:
+                        pass
+                    finally:
+                        try:
+                            c.close()
+                        except OSError:
+                            pass
+
+                threading.Thread(target=drain, args=(conn,), daemon=True).start()
+
+        threading.Thread(target=stall_accept, daemon=True).start()
+
+        response = JevEvaluateProvider(timeout_s=0.4, retries=1).judge(get_detector("price"), request)
+        if response.error_category != "timeout":
+            problems.append(
+                f"timeout probe: socket/read timeout must classify error_category='timeout', "
+                f"got {response.error_category!r}"
+            )
+        if "timeout" not in (response.provider_error or "").lower():
+            problems.append(
+                f"timeout probe: provider_error must be a bounded timeout message, "
+                f"got {response.provider_error!r}"
+            )
+        if "127.0.0.1" in (response.provider_error or ""):
+            problems.append("timeout probe: provider_error leaked the endpoint host")
+        if _HTTP_API_KEY_POISON in (response.provider_error or ""):
+            problems.append("timeout probe: provider_error leaked credential text")
+        if response.result is not None or response.schema_valid:
+            problems.append("timeout probe: a timed-out judge must not fabricate a result")
+        if response.retries != 1:
+            problems.append(f"timeout probe: expected retries=1 for two exhausted attempts, got {response.retries}")
+    finally:
+        try:
+            listen_sock.close()
+        except OSError:
+            pass
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
 def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     """All deterministic integrity checks; one problem per list entry."""
     problems: list[str] = []
@@ -687,4 +992,6 @@ def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     problems.extend(command_value_probe())
     problems.extend(http_provider_probe())
     problems.extend(evaluate_provider_probe())
+    problems.extend(extraction_mapping_probe())
+    problems.extend(timeout_classification_probe())
     return problems
