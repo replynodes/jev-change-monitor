@@ -52,6 +52,27 @@ jev-monitor webhook-demo                      # signed sender -> receiver roundt
 jev-monitor blocked-live                      # BLOCKED probe -> gitignored results/runs/
 ```
 
+Live Jev via the typed `/v1/evaluate` protocol (provider `jev-evaluate`):
+
+```sh
+export JEV_ENDPOINT=https://ai-gateway.vercel.sh/v1/evaluate
+export JEV_API_KEY=change-me                  # env-only, never logged
+export JEV_MODEL=typesafe-ai/jev
+export JEV_PROTOCOL=evaluate                  # protocol gate for the evaluate provider
+jev-monitor demo --provider jev-evaluate      # smoke: 3 example cases
+jev-monitor benchmark --split dev --provider jev-evaluate --out results/runs/live-jev-dev.json
+jev-monitor benchmark --split held_out --provider jev-evaluate --out results/runs/live-jev-held_out.json
+```
+
+The evaluate provider sends `{model, state, questions}` to `JEV_ENDPOINT`
+(the `/v1/evaluate` contract — the endpoint has no chat completions surface),
+with bounded normalized before/after state and detector-specific typed
+questions. Typed answers (`boolean`/`noul`/`choice`/`score`) map into
+`schemas/detector-result.schema.json`; an answer that cannot be mapped safely
+is recorded as `schema_invalid`/`provider` error rather than fabricating
+fields (see `docs/benchmark-methodology.md`). `jev-http` remains the
+chat-completions protocol and refuses to run when `JEV_PROTOCOL=evaluate`.
+
 Docker:
 
 ```sh

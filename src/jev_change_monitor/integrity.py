@@ -459,6 +459,225 @@ def http_provider_probe() -> list[str]:
     return problems
 
 
+def evaluate_provider_probe() -> list[str]:
+    """Poison JEV_ENDPOINT/JEV_API_KEY/JEV_PROTOCOL and check typed-answer mapping.
+
+    Deterministic CLI/artifact inspection (not a unit test), mirroring
+    `http_provider_probe` and `command_value_probe`:
+
+    1. Poison env — a fully configured `JevEvaluateProvider` must never echo
+       the endpoint URL or API key from `describe()`, and a real
+       connection-refused `judge()` over loopback port 1 must record only a
+       bounded, withheld `provider_error` (never endpoint fragments, never
+       credential text, `error_category = "provider"`).
+    2. Protocol gates — `JEV_PROTOCOL=evaluate` with a chat-completions-style
+       URL must be refused with a bounded message that never echoes the URL;
+       `JEV_PROTOCOL=<other>` must report the provider as unconfigured.
+    3. Typed-answer mapping contract (pure `map_answers`, no network) — fully
+       typed payloads map to a schema-valid detector result with
+       `confidence_source = "jev-raw-probability"`; boolean answers carrying
+       only a probability map via the documented >= 0.5 rule; exact usage/cost
+       numbers pass through; unmappable answers (missing answer, `noul`
+       abstention, choice outside the allowed set, score outside [0,1],
+       missing answers envelope) are recorded as
+       `schema_invalid`/`provider` errors with result=None — fields are never
+       fabricated.
+    """
+    import os
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_evaluate import (
+        JevEvaluateProvider,
+        map_answers,
+    )
+
+    problems: list[str] = []
+    tokens = (_HTTP_ENDPOINT_POISON, _HTTP_API_KEY_POISON,
+              _HTTP_SK_TOKEN, _HTTP_RN_TOKEN, _HTTP_AKIA_TOKEN,
+              _HTTP_BEARER_HEADER_SHAPE)
+    _EVAL_ENDPOINT_POISON = (
+        "http://127.0.0.1:1/v1/evaluate?token=" + _HTTP_SK_TOKEN
+        + "&key=" + _HTTP_RN_TOKEN
+        + "&aws=" + _HTTP_AKIA_TOKEN
+    )
+    _EVAL_ENDPOINT_FRAGMENTS = ("http://127.0.0.1", "/v1/evaluate")
+
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL", "JEV_PROTOCOL")}
+    try:
+        # --- poisoned env: endpoint/key must never leak; judge() over closed
+        # loopback port 1 records a bounded withheld error ---
+        os.environ["JEV_ENDPOINT"] = _EVAL_ENDPOINT_POISON
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+
+        provider = JevEvaluateProvider()
+        if not provider.configured:
+            problems.append("evaluate probe: poison env did not configure the provider")
+
+        describe_blob = json.dumps(provider.describe(), sort_keys=True)
+        for token in tokens:
+            if token in describe_blob:
+                problems.append("evaluate probe: raw endpoint/api-key text reached describe()")
+
+        case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+        request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+        response = provider.judge(get_detector("price"), request)
+        if response.error_category != "provider":
+            problems.append(
+                "evaluate probe: provider failures must keep error_category='provider' "
+                "(provider-error metrics stay wired)"
+            )
+        provider_error = response.provider_error or ""
+        for token in tokens:
+            if token in provider_error:
+                problems.append("evaluate probe: endpoint/credential text reached provider_error")
+        for fragment in _EVAL_ENDPOINT_FRAGMENTS:
+            if fragment in provider_error:
+                problems.append("evaluate probe: provider_error exposes endpoint URL fragments")
+        if "details withheld" not in provider_error:
+            problems.append(
+                f"evaluate probe: provider_error must be a bounded withheld category, "
+                f"got {provider_error!r}"
+            )
+
+        # --- protocol gate: chat-completions URL must be refused, bounded ---
+        os.environ["JEV_ENDPOINT"] = _HTTP_ENDPOINT_POISON  # /chat/completions + tokens
+        chat_guard = JevEvaluateProvider().judge(get_detector("price"), request)
+        chat_error = chat_guard.provider_error or ""
+        if "chat-completions" not in chat_error:
+            problems.append(
+                f"evaluate probe: chat-completions URL must be refused with a bounded "
+                f"message, got {chat_error!r}"
+            )
+        # The guard must never echo the configured endpoint: no credential
+        # tokens, no scheme/host fragments. (The literal protocol path
+        # "/v1/evaluate" is allowed as a protocol name in the message, so it
+        # is not treated as a leak.)
+        for token in tokens + ("http://", "127.0.0.1", "/chat/completions"):
+            if token in chat_error:
+                problems.append("evaluate probe: chat-guard message echoed the endpoint")
+
+        # --- protocol gate: non-evaluate JEV_PROTOCOL reports unconfigured ---
+        os.environ["JEV_ENDPOINT"] = _EVAL_ENDPOINT_POISON
+        os.environ["JEV_PROTOCOL"] = "chat"
+        if JevEvaluateProvider().configured:
+            problems.append("evaluate probe: JEV_PROTOCOL != evaluate must not configure the provider")
+
+        # --- typed-answer mapping contract (pure, no network) ---
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+        meta = {"evidence_normalized": True, "evidence_truncated": True,
+                "evidence_cap_chars": 64000}
+        from jev_change_monitor.schemas import validate_schema
+
+        # Mixed native + gateway answer shapes: noul (native), boolean with
+        # probability (verified gateway example), choice with `choice` key,
+        # score with `confidence`.
+        payload_ok = {
+            "model": "typesafe-ai/jev",
+            "usage": {"input_tokens": 1200, "output_tokens": 90, "total_cost_usd": 0.0042},
+            "answers": {
+                "valid": {"type": "noul", "noul": 0.99},
+                "meaningful": {"type": "boolean", "probability": 0.85},
+                "change_type": {"type": "choice", "choice": "price_increase",
+                                "probabilities": {"price_increase": 1.0}},
+                "importance": {"type": "choice", "value": "high"},
+                "should_alert": {"type": "boolean", "probability": 0.8},
+                "confidence": {"type": "score", "score": 3.0, "confidence": 0.75},
+            },
+        }
+        ok = map_answers(payload_ok, get_detector("price"), meta)
+        if not ok.schema_valid or ok.error_category != "none":
+            problems.append(f"evaluate probe: fully-typed payload must map cleanly: "
+                            f"{ok.provider_error!r}")
+        if ok.result is None:
+            problems.append("evaluate probe: fully-typed payload produced no result")
+        else:
+            result = ok.result
+            if not (result["valid"] is True and result["meaningful"] is True
+                    and result["should_alert"] is True):
+                problems.append("evaluate probe: boolean/noul mapping wrong for fully-typed payload")
+            if result["change_type"] != "price_increase" or result["importance"] != "high":
+                problems.append("evaluate probe: choice mapping wrong for fully-typed payload")
+            if result["confidence"] != 0.8 or result["confidence_source"] != "jev-raw-probability":
+                problems.append("evaluate probe: raw-probability confidence mapping wrong "
+                                "(expected should_alert probability 0.8)")
+            schema_errors = validate_schema(result, "detector-result")
+            if schema_errors:
+                problems.append(f"evaluate probe: mapped result schema-invalid: "
+                                f"{'; '.join(schema_errors)}")
+            usage = ok.usage.get("provider_usage", {})
+            if usage.get("input_tokens") != 1200 or usage.get("total_cost_usd") != 0.0042:
+                problems.append("evaluate probe: exact usage/cost numbers must pass through")
+
+        # boolean-family answer with only a probability: documented >= 0.5 rule
+        payload_prob = {
+            "answers": {
+                "valid": {"type": "boolean", "value": True},
+                "meaningful": {"type": "noul", "noul": 0.3},
+                "change_type": {"type": "choice", "value": "none"},
+                "importance": {"type": "choice", "value": "low"},
+                "should_alert": {"type": "boolean", "probability": 0.7},
+            },
+        }
+        prob = map_answers(payload_prob, get_detector("price"), meta)
+        if not prob.schema_valid or prob.result is None:
+            problems.append("evaluate probe: probability-only boolean payload failed to map")
+        else:
+            if prob.result["meaningful"] is not False:
+                problems.append("evaluate probe: probability-only boolean must map via >= 0.5 rule")
+            if prob.result["should_alert"] is not True:
+                problems.append("evaluate probe: probability-only boolean must map via >= 0.5 rule")
+
+        # unmappable cases must never fabricate fields
+        unmappable_cases = [
+            ("missing should_alert",
+             {"answers": {k: v for k, v in payload_ok["answers"].items()
+                          if k != "should_alert"}},
+             "schema_invalid", "should_alert"),
+            ("unknown answer type on meaningful",
+             {"answers": {**payload_ok["answers"],
+                          "meaningful": {"type": "text", "value": "probably"}}},
+             "schema_invalid", "meaningful"),
+            ("choice outside allowed set",
+             {"answers": {**payload_ok["answers"],
+                          "change_type": {"type": "choice", "value": "price_removed_typo"}}},
+             "schema_invalid", "change_type"),
+            ("score answer without usable confidence",
+             {"answers": {**payload_ok["answers"],
+                          "confidence": {"type": "score", "score": 3.0},
+                          "should_alert": {"type": "boolean", "value": True},
+                          "meaningful": {"type": "boolean", "value": True}}},
+             "schema_invalid", "confidence"),
+            ("missing answers envelope",
+             {"result": "text"},
+             "provider", "answers"),
+        ]
+        for name, payload, expected_category, expected_token in unmappable_cases:
+            got = map_answers(payload, get_detector("price"), meta)
+            if got.schema_valid is not False or got.error_category != expected_category:
+                problems.append(
+                    f"evaluate probe: {name} must record error_category={expected_category}, "
+                    f"got schema_valid={got.schema_valid} category={got.error_category!r}"
+                )
+            if got.result is not None:
+                problems.append(f"evaluate probe: {name} must NOT fabricate a result")
+            if expected_token not in (got.provider_error or ""):
+                problems.append(
+                    f"evaluate probe: {name} provider_error must name {expected_token!r}, "
+                    f"got {got.provider_error!r}"
+                )
+    finally:
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
 def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     """All deterministic integrity checks; one problem per list entry."""
     problems: list[str] = []
@@ -467,4 +686,5 @@ def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     problems.extend(rubric_citations())
     problems.extend(command_value_probe())
     problems.extend(http_provider_probe())
+    problems.extend(evaluate_provider_probe())
     return problems

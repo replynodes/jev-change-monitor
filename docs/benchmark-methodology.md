@@ -130,6 +130,83 @@ refuses `PASS` while `launch_claim.reasons` is non-empty or
 `dataset.human_labeled` is false, so a launch blocker can never be reported as
 green. Nothing in this repository claims the launch thresholds passed.
 
+## Live Jev evaluation protocol (`jev-evaluate`)
+
+The typed `/v1/evaluate` endpoint (e.g.
+`https://ai-gateway.vercel.sh/v1/evaluate`) has **no chat completions
+surface**, so provider `jev-evaluate` implements its own wire contract instead
+of reusing `jev-http`:
+
+```
+POST {JEV_ENDPOINT}
+Authorization: Bearer {JEV_API_KEY}
+{"model": "<JEV_MODEL or detector id>",
+ "state": "BEFORE (normalized):\n<bounded normalized before>\n\nAFTER (normalized):\n<bounded normalized after>",
+ "questions": {                          # MAP of question id -> question
+   "valid":        {"type": "boolean", "instructions": "..."},
+   "change_type":  {"type": "choice", "instructions": "...",
+                    "criteria": {"<option>": "<description>", ...}},
+   "confidence":   {"type": "score", "instructions": "...",
+                    "criteria": ["<level 1>", ..., "<level N>"]},
+   ...
+ }}
+```
+
+- `state` is a **string** carrying the bounded, normalized BEFORE/AFTER
+  evidence (never raw page content) in a deterministic template — the
+  `bounded_evidence` discipline (`normalize_bounded`, 64,000 char cap,
+  truncation recorded in the artifact) reused from `jev-http` /
+  `jev-command`. Verified against the live gateway: `state` as an object is
+  rejected (HTTP 400) by `/v1/evaluate`.
+- `questions` is a **map** of detector-specific typed questions, each with
+  `type` + `instructions` (choice adds a `criteria` map of option->description,
+  score adds an ordered `criteria` array of 2-10 level descriptions). The live
+  gateway accepts the `boolean` question type for binary decisions (the noul
+  family); `choice` and `score` complete the official type set. Content is
+  static, built only from the committed DetectorSpec — never from page text.
+- The endpoint answers with a typed answers map. The gateway renders the
+  boolean/noul family as `{"type": "boolean", "probability": 0.85}` (verified
+  live contract); the native System One endpoint renders it as
+  `{"type": "noul", "noul": 0.8}`. Choice answers carry the chosen option in
+  `choice` (or `value`);
+  score answers carry the score position in `score` (or `value`) plus a
+  `confidence`. The mapper accepts both renderings (`boolean` and `noul`).
+
+Typed-answer mapping into `schemas/detector-result.schema.json`:
+
+| answer | maps to | rule |
+| --- | --- | --- |
+| `valid` / `meaningful` / `should_alert` (boolean / noul) | same-named result field | explicit `value` when present; otherwise the documented rule `value = probability >= 0.5`, where probability comes from `probability` / `noul` / `confidence` in [0,1] |
+| `change_type` (choice) | `change_type` | chosen option must be inside the detector's `allowed_change_types`; otherwise unmappable |
+| `importance` (choice) | `importance` | chosen option must be `low`/`medium`/`high` |
+| `confidence` (raw probability) | `confidence` | the raw `probability`/`noul` of the `should_alert` answer, else the `meaningful` answer; else the `confidence` reported on the score question answer — all in [0,1] |
+
+`confidence_source` is always `jev-raw-probability` for this provider (raw
+uncalibrated probability semantics, docs/detector-contracts.md). The result
+`summary` and `details` are built deterministically from the mapped answers —
+never from raw response text. An answer that cannot be mapped safely is
+recorded as `schema_invalid` (or `provider` when the response envelope is
+missing) with a bounded `provider_error` naming the failing answer id/rule;
+**fields are never fabricated**. Exact numeric usage/cost returned by the
+gateway pass through to the per-case `usage` record (bounded numeric/bool
+passthrough only).
+
+Protocol gate: `JEV_PROTOCOL` must be unset or `evaluate` for
+`jev-evaluate`; any other value reports the provider as not-configured, and
+`jev-http` (chat-completions) refuses to run when `JEV_PROTOCOL=evaluate`, so
+a chat-shaped configuration can never accidentally hit an evaluate endpoint.
+`JEV_ENDPOINT` containing `/chat/completions` is refused by `jev-evaluate`
+(the contract targets `/v1/evaluate` only). Failure messages never echo the
+endpoint URL, response fragments or credential text — only bounded status
+categories (e.g. `HTTP 400`) and withheld-detail type names are recorded.
+HTTP 429 (rate limit) is retried with a bounded `Retry-After` backoff (header
+value capped at 60s, 1s default when absent) instead of an immediate burst
+re-send; when retries are exhausted the case records `provider_error =
+"HTTP 429"` only.
+
+Run-local live runs write to the gitignored `results/runs/` (e.g.
+`results/runs/live-jev-dev.json`); committed artifacts are never overwritten.
+
 ## Redaction integrity
 
 `jev-monitor redact-check` (also run inside `validate`) proves, over a fixed

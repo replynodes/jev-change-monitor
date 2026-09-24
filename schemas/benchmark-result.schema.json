@@ -27,6 +27,7 @@
         "provider": { "type": "string" },
         "mode": { "enum": ["deterministic", "live"] },
         "model": { "type": ["string", "null"] },
+        "protocol": { "type": "string" },
         "endpoint_configured": { "type": ["string", "boolean"] },
         "api_key_configured": { "type": ["string", "boolean"] },
         "command_configured": { "type": ["string", "boolean"] },
@@ -125,7 +126,11 @@
               "input_bytes": { "type": "integer", "minimum": 0 },
               "output_bytes": { "type": "integer", "minimum": 0 },
               "retries": { "type": "integer", "minimum": 0 },
-              "injected_fault": { "type": "boolean" }
+              "injected_fault": { "type": "boolean" },
+              "usage": {
+                "type": ["object", "null"],
+                "description": "Exact provider metrics/cost/usage where returned by the live endpoint (bounded numeric/bool passthrough + evidence meta); never an endpoint URL or credential value."
+              }
             }
           }
         }

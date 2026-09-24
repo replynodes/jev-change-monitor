@@ -5,15 +5,19 @@ Configuration (environment only, never read from files):
 - `JEV_API_KEY`   — bearer token (required; never logged or printed; passed
   only inside the Authorization header)
 - `JEV_MODEL`     — model id (optional; recorded in results as reported)
+- `JEV_PROTOCOL`  — when set to `evaluate`, this chat provider refuses to run
+  (the typed /v1/evaluate protocol lives in provider `jev-evaluate`), so a
+  chat-shaped request can never accidentally hit an evaluate endpoint.
 
 The repository cannot fabricate live Jev results. When `JEV_ENDPOINT` is
 unset, this provider reports itself as not-configured and the benchmark emits
 a machine-readable BLOCKED result for semantic thresholds.
 
-Error discipline matches `jev-command`: failure messages never echo exception
-detail, the endpoint URL, or response fragments. Only bounded, fixed error
-categories are recorded (HTTP status codes and withheld-detail type names), so
-the configured endpoint can never reach a result artifact.
+Error discipline matches `jev-command` and `jev-evaluate`: failure messages
+never echo exception detail, the endpoint URL, or response fragments. Only
+bounded, fixed error categories are recorded (HTTP status codes and
+withheld-detail type names), so the configured endpoint can never reach a
+result artifact.
 """
 
 from __future__ import annotations
@@ -49,8 +53,15 @@ class JevHttpProvider:
         self.model = os.environ.get("JEV_MODEL", "").strip() or None
 
     @property
+    def protocol_mismatch(self) -> str | None:
+        if os.environ.get("JEV_PROTOCOL", "").strip() == "evaluate":
+            return ("JEV_PROTOCOL=evaluate selects provider jev-evaluate; "
+                    "jev-http is the chat-completions protocol")
+        return None
+
+    @property
     def configured(self) -> bool:
-        return bool(self.endpoint and self.api_key)
+        return self.protocol_mismatch is None and bool(self.endpoint and self.api_key)
 
     def _request_body(self, detector: DetectorSpec, request: dict) -> tuple[dict, dict]:
         evidence, meta = bounded_evidence(request)
@@ -70,6 +81,13 @@ class JevHttpProvider:
         }, meta
 
     def judge(self, detector: DetectorSpec, request: dict) -> ProviderResponse:
+        mismatch = self.protocol_mismatch
+        if mismatch:
+            return ProviderResponse(
+                provider=self.name, mode=self.mode, result=None, raw=None,
+                latency_ms=0.0, input_bytes=0, output_bytes=0, schema_valid=False,
+                error_category="provider", provider_error=mismatch,
+            )
         if not self.configured:
             return ProviderResponse(
                 provider=self.name, mode=self.mode, result=None, raw=None,
@@ -130,6 +148,7 @@ class JevHttpProvider:
             "provider": self.name,
             "mode": self.mode,
             "model": self.model,
+            "protocol": "chat",
             "endpoint_configured": env_flag("JEV_ENDPOINT"),
             "api_key_configured": env_flag("JEV_API_KEY"),
             "timeout_s": self.timeout_s,
@@ -138,8 +157,11 @@ class JevHttpProvider:
 
 
 def available_live_providers() -> list[dict]:
+    from jev_change_monitor.providers.jev_command import JevCommandProvider
+    from jev_change_monitor.providers.jev_evaluate import JevEvaluateProvider
+
     out = []
-    for cls in (JevCommandProvider, JevHttpProvider):
+    for cls in (JevCommandProvider, JevHttpProvider, JevEvaluateProvider):
         p = cls()
         out.append({"name": p.name, "configured": p.configured, "describe": p.describe()})
     return out

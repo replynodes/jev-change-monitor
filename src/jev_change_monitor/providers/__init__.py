@@ -1,12 +1,14 @@
 from jev_change_monitor.providers.base import JudgementProvider, ProviderResponse
 from jev_change_monitor.providers.heuristic import HeuristicBaselineProvider
 from jev_change_monitor.providers.jev_command import JevCommandProvider
+from jev_change_monitor.providers.jev_evaluate import JevEvaluateProvider
 from jev_change_monitor.providers.jev_http import JevHttpProvider
 
 PROVIDERS = {
     "heuristic": HeuristicBaselineProvider,
     "jev-command": JevCommandProvider,
     "jev-http": JevHttpProvider,
+    "jev-evaluate": JevEvaluateProvider,
 }
 
 
@@ -22,5 +24,5 @@ def provider_for_mode(mode: str) -> list[JudgementProvider]:
     if mode == "deterministic":
         return [HeuristicBaselineProvider()]
     if mode == "live":
-        return [JevCommandProvider(), JevHttpProvider()]
+        return [JevCommandProvider(), JevHttpProvider(), JevEvaluateProvider()]
     raise ValueError(f"unknown mode {mode!r}")
