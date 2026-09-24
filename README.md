@@ -122,18 +122,22 @@ The launch thresholds from #487 are **not** passed by this repository today:
 - Live `jev-evaluate` held-out runs observe real metrics but do not meet the
   frozen #487 thresholds, so `launch_claim.status` stays `failed` — never
   `passed`. The most recent run (gitignored `results/runs/live-jev-*.json`,
-  111 cases, 109 evaluable) failed **all five** frozen threshold checks:
-  1. price `exact_price_accuracy` **0.886** < 0.95 (min), measured over the
-     exact 35-row extraction denominator (`price_cases_with_expectation`; 40
-     total price cases minus 5 no-expectation/noise cases);
-  2. price `false_change_rate` **0.143** > 0.02 (max);
-  3. saas_pricing `false_alert_rate` **0.154** > 0.10 (max);
-  4. product_change `precision` **0.833** < 0.90 (min);
-  5. product_change `false_alert_rate` **0.167** > 0.10 (max).
-  Two of the 111 cases were bounded provider errors (1× HTTP 429, 1× HTTP
-  503) — recorded as honest `provider`-category rows with truthful retry
-  counts, never fake semantic results — and the artifact records the
-  evaluable subset (109) explicitly.
+  111 cases, 105 evaluable) failed **all six** frozen threshold checks:
+  1. price `exact_price_accuracy` **0.879** < 0.95 (min), measured over the
+     exact 33-row extraction denominator (`price_cases_with_expectation`;
+     amount 31/33, currency 32/33, direction 30/33);
+  2. price `false_change_rate` **0.077** > 0.02 (max);
+  3. saas_pricing `precision` **0.875** < 0.90 (min);
+  4. saas_pricing `false_alert_rate` **0.231** > 0.10 (max);
+  5. product_change `precision` **0.824** < 0.90 (min);
+  6. product_change `false_alert_rate` **0.176** > 0.10 (max).
+  Six of the 111 cases were bounded provider errors (all HTTP 503,
+  `retries=0`) — recorded as honest `provider`-category rows with truthful
+  retry counts, never fake semantic results — and the artifact records the
+  evaluable subset (105) explicitly. The dev split ran 15/15 evaluable with
+  zero provider errors and failed only the frozen price `exact_price_accuracy`
+  check (0.8 < 0.95); both live artifacts keep `launch_claim.status =
+  "failed"` and never claim `passed`.
 
 `jev-monitor gate --result <artifact>` tells you the launch claim for any
 artifact and refuses `PASS` while any launch blocker (missing live Jev run,

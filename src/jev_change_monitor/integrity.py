@@ -47,6 +47,12 @@ These are integration/repro checks over the *committed* tree, not unit tests:
    `error_category = \"timeout\"` with a bounded withheld `provider_error`,
    bounded retry/backoff, and never a fabricated result; endpoint/credential
    fragments must not leak. Loopback-only and deterministic.
+8. jev-http protocol refusal — with `JEV_PROTOCOL=evaluate` set, the
+   chat-completions `jev-http` provider must refuse to run (the protocol
+   mismatch is the only blocker): `judge()` records a bounded
+   `provider`-category error naming both providers, never echoes the
+   endpoint or credential text, and unsetting `JEV_PROTOCOL` restores the
+   normal configured path. Deterministic and network-free.
 
 `jev-monitor validate` runs the same checks; `jev-monitor redact-check` is the
 standalone deterministic entry point.
@@ -692,6 +698,108 @@ def evaluate_provider_probe() -> list[str]:
     return problems
 
 
+def evaluate_http_protocol_probe() -> list[str]:
+    """Poison env and check jev-http's JEV_PROTOCOL=evaluate refusal gate.
+
+    Deterministic CLI inspection (not a unit test), mirroring
+    `http_provider_probe` / `evaluate_provider_probe`:
+
+    1. Protocol gate — with `JEV_PROTOCOL=evaluate` set and a fully
+       configured chat-completions `JEV_ENDPOINT` + `JEV_API_KEY`, the
+       `jev-http` provider must refuse to run: `protocol_mismatch` non-null,
+       `configured` False, and a real `judge()` call must return a bounded
+       `provider`-category error naming both providers — never endpoint
+       fragments, never credential text, `result=None`.
+    2. The refusal must be the ONLY blocker — with `JEV_PROTOCOL` unset the
+       same env configures the provider (`protocol_mismatch` None,
+       `configured` True), so the gate cannot silently disable the
+       chat-completions path by accident.
+    """
+    import os
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_http import JevHttpProvider
+
+    problems: list[str] = []
+    tokens = (_HTTP_ENDPOINT_POISON, _HTTP_API_KEY_POISON,
+              _HTTP_SK_TOKEN, _HTTP_RN_TOKEN, _HTTP_AKIA_TOKEN,
+              _HTTP_BEARER_HEADER_SHAPE)
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL", "JEV_PROTOCOL")}
+    try:
+        os.environ["JEV_ENDPOINT"] = _HTTP_ENDPOINT_POISON
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+
+        provider = JevHttpProvider()
+        if provider.protocol_mismatch is None:
+            problems.append(
+                "http-protocol probe: JEV_PROTOCOL=evaluate must set protocol_mismatch on jev-http"
+            )
+        if provider.configured:
+            problems.append(
+                "http-protocol probe: JEV_PROTOCOL=evaluate must not configure jev-http"
+            )
+
+        describe_blob = json.dumps(provider.describe(), sort_keys=True)
+        for token in tokens:
+            if token in describe_blob:
+                problems.append("http-protocol probe: raw endpoint/api-key text reached describe()")
+
+        case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+        request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+        response = provider.judge(get_detector("price"), request)
+        if response.error_category != "provider":
+            problems.append(
+                "http-protocol probe: the protocol refusal must keep error_category='provider' "
+                "(provider-error metrics stay wired)"
+            )
+        if response.schema_valid is not False or response.result is not None:
+            problems.append(
+                "http-protocol probe: the protocol refusal must never fabricate a result"
+            )
+        provider_error = response.provider_error or ""
+        if "jev-evaluate" not in provider_error or "jev-http" not in provider_error:
+            problems.append(
+                f"http-protocol probe: refusal message must name both providers, "
+                f"got {provider_error!r}"
+            )
+        if "chat-completions" not in provider_error:
+            problems.append(
+                f"http-protocol probe: refusal message must name the chat-completions protocol, "
+                f"got {provider_error!r}"
+            )
+        for token in tokens:
+            if token in provider_error:
+                problems.append(
+                    "http-protocol probe: endpoint/credential text reached provider_error"
+                )
+        for fragment in _HTTP_ENDPOINT_FRAGMENTS:
+            if fragment in provider_error:
+                problems.append("http-protocol probe: provider_error exposes endpoint URL fragments")
+
+        # The refusal must be the ONLY blocker: the same env without the
+        # protocol variable configures the chat-completions provider normally.
+        os.environ.pop("JEV_PROTOCOL", None)
+        if JevHttpProvider().protocol_mismatch is not None:
+            problems.append(
+                "http-protocol probe: unset JEV_PROTOCOL must not report a protocol mismatch"
+            )
+        if not JevHttpProvider().configured:
+            problems.append(
+                "http-protocol probe: unset JEV_PROTOCOL with endpoint+key must configure jev-http"
+            )
+    finally:
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
 def extraction_mapping_probe() -> list[str]:
     """Deterministic price-extraction mapping probe (pure, no network).
 
@@ -1306,6 +1414,7 @@ def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     problems.extend(rubric_citations())
     problems.extend(command_value_probe())
     problems.extend(http_provider_probe())
+    problems.extend(evaluate_http_protocol_probe())
     problems.extend(evaluate_provider_probe())
     problems.extend(extraction_mapping_probe())
     problems.extend(timeout_classification_probe())
