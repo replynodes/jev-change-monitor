@@ -236,7 +236,9 @@ a chat-shaped configuration can never accidentally hit an evaluate endpoint.
 endpoint URL, response fragments or credential text — only bounded status
 categories (e.g. `HTTP 400`) and withheld-detail type names are recorded.
 HTTP 429 (rate limit) is retried with a bounded `Retry-After` backoff (header
-value capped at 60s, 1s default when absent) instead of an immediate burst
+value clamped to the 60s cap — a requested wait above the cap waits the full
+60s, never silently reduced to 1s — and 1s default when the value is absent or
+malformed) instead of an immediate burst
 re-send; when retries are exhausted the case records `provider_error =
 "HTTP 429"` only, keeping `error_category = "provider"` so rate-limit metrics
 stay wired. A socket/read timeout (`URLError` wrapping `TimeoutError`, or a

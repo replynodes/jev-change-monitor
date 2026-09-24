@@ -1002,6 +1002,9 @@ def retry_semantics_probe() -> list[str]:
     4. A non-timeout connection failure (connection refused) is recorded
        immediately: `retries == 0`, bounded withheld `provider_error`, no
        fabricated result.
+    5. A `Retry-After` value above the 60s cap is clamped to the cap rather
+       than silently reduced to the 1s default; malformed/absent values use
+       the 1s default.
     """
     import os
     import socket
@@ -1010,7 +1013,10 @@ def retry_semantics_probe() -> list[str]:
 
     from jev_change_monitor.benchmark import runner as runner_mod
     from jev_change_monitor.detectors import get_detector
-    from jev_change_monitor.providers.jev_evaluate import JevEvaluateProvider
+    from jev_change_monitor.providers.jev_evaluate import (
+        JevEvaluateProvider,
+        _bounded_retry_after,
+    )
 
     problems: list[str] = []
     case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
@@ -1252,6 +1258,35 @@ def retry_semantics_probe() -> list[str]:
             problems.append("retry probe: a refused connection must not fabricate a result")
         if "127.0.0.1" in (refused.provider_error or ""):
             problems.append("retry probe: connection-refused error leaked the endpoint host")
+
+        # --- 5. Retry-After clamping (P2-2): deterministic, network-free ---
+        class _FakeExc:
+            def __init__(self, headers: dict):
+                self.headers = headers
+
+        if _bounded_retry_after(_FakeExc({"Retry-After": "120"}),
+                                default=1.0, cap=60.0) != 60.0:
+            problems.append(
+                "retry probe: Retry-After above the cap must clamp to the cap "
+                "(60s), not silently fall back to the 1s default"
+            )
+        if _bounded_retry_after(_FakeExc({"Retry-After": "2"}),
+                                default=1.0, cap=60.0) != 2.0:
+            problems.append(
+                "retry probe: in-range Retry-After must pass through unchanged"
+            )
+        if _bounded_retry_after(_FakeExc({"Retry-After": "not-a-number"}),
+                                default=1.0, cap=60.0) != 1.0:
+            problems.append(
+                "retry probe: malformed Retry-After must use the 1s default"
+            )
+        if _bounded_retry_after(_FakeExc({}), default=1.0, cap=60.0) != 1.0:
+            problems.append("retry probe: absent Retry-After must use the 1s default")
+        if _bounded_retry_after(_FakeExc({"Retry-After": "-5"}),
+                                default=1.0, cap=60.0) != 1.0:
+            problems.append(
+                "retry probe: non-positive Retry-After must use the 1s default"
+            )
     finally:
         for stop in listeners:
             stop()

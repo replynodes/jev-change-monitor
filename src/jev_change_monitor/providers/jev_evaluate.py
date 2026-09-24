@@ -479,14 +479,17 @@ def _bounded_retry_after(exc, default: float = 1.0, cap: float = 60.0) -> float:
     """Bounded Retry-After backoff for HTTP 429 (rate limit).
 
     Reads only the non-secret `Retry-After` header (never the body),
-    returns a number in [0, cap] or the default when absent/unparseable.
+    returns a number in (0, cap]: values above the cap are clamped to the
+    cap (a server requesting a longer wait simply makes us wait the full
+    cap rather than silently re-sending after 1s). The default (1s) applies
+    only when the value is absent or malformed (unparseable / non-positive).
     """
     headers = getattr(exc, "headers", None)
     if headers is not None:
         try:
             seconds = float(headers.get("Retry-After", ""))
-            if 0 < seconds <= cap:
-                return seconds
+            if seconds > 0:
+                return min(seconds, cap)
         except (TypeError, ValueError):
             pass
     return default

@@ -77,7 +77,8 @@ them deterministically into the required `details.extraction` (`amount`,
 `currency`, `period`, `amount_before`, `currency_before`, `direction`) — an
 amount is never invented. Socket/read timeouts are classified separately as
 `timeout` with bounded backoff; HTTP 429 stays a bounded rate-limit provider
-error (bounded `Retry-After`); any other HTTP 4xx/5xx and any non-timeout
+error (bounded `Retry-After`: clamped to 60s, 1s default when absent or
+malformed); any other HTTP 4xx/5xx and any non-timeout
 connection/other error stops immediately without a useless re-send. A success
 after retry(s) records the real `retries = attempt - 1` in the artifact.
 `jev-http` remains the chat-completions protocol and refuses to run
