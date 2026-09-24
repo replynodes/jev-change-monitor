@@ -154,7 +154,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
     print("== secret hygiene ==")
     print(f"  JEV_ENDPOINT {env_flag('JEV_ENDPOINT')}, JEV_API_KEY {env_flag('JEV_API_KEY')}, "
-          f"JEV_COMMAND {env_flag('JEV_COMMAND')}")
+          f"JEV_COMMAND {env_flag('JEV_COMMAND')}, JEV_PROTOCOL {env_flag('JEV_PROTOCOL')}")
 
     print("== redaction integrity (hashes survive, secrets redacted) ==")
     integrity_problems = run_redact_check()
@@ -163,8 +163,10 @@ def cmd_validate(args: argparse.Namespace) -> int:
     problems.extend(f"redact-check: {p}" for p in integrity_problems)
     if not integrity_problems:
         print("  ok  hash fields byte-exact; full secret tokens absent (safe prefix + "
-              "[REDACTED] only); rubric paths resolve; JEV_COMMAND values and JEV_HTTP "
-              "endpoint detail never persist")
+              "[REDACTED] only); rubric paths resolve; JEV_COMMAND values and JEV_HTTP / "
+              "JEV_EVALUATE endpoint detail never persist; price-extraction mapping, "
+              "socket/read-timeout classification, retry-semantics and jev-http "
+              "protocol-refusal probes pass")
 
     if problems:
         print("\n".join(f"  - {p}" for p in problems))
@@ -175,11 +177,13 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 def cmd_benchmark(args: argparse.Namespace) -> int:
     provider = get_provider(args.provider)
-    if args.provider in ("jev-http", "jev-command") and not getattr(provider, "configured", False):
+    if args.provider in ("jev-http", "jev-command", "jev-evaluate") and not getattr(provider, "configured", False):
         print(f"BLOCKED: provider {args.provider} is not configured in this environment.")
         print("No live Jev credential/runtime is available, so semantic thresholds cannot be "
               "evaluated. Recording a machine-readable BLOCKED result instead of fabricating "
               "live numbers.")
+        print("(provider jev-evaluate requires JEV_ENDPOINT + JEV_API_KEY with "
+              "JEV_PROTOCOL unset or 'evaluate'; jev-http is the chat-completions protocol.)")
         if not args.allow_unconfigured:
             return 2
     if args.out:
@@ -308,7 +312,9 @@ def cmd_redact_check(args: argparse.Namespace) -> int:
         return _fail(f"{len(problems)} integrity problem(s)")
     print("redact-check: PASS (hash fields byte-exact; full secret tokens absent — safe "
           "prefix + [REDACTED] only; rubric paths resolve; JEV_COMMAND values and "
-          "JEV_HTTP endpoint detail never persist)")
+          "JEV_HTTP / JEV_EVALUATE endpoint detail never persist; price-extraction "
+          "mapping, socket/read-timeout classification, retry-semantics and jev-http "
+          "protocol-refusal probes pass)")
     return 0
 
 
@@ -421,9 +427,10 @@ def cmd_webhook_demo(args: argparse.Namespace) -> int:
 
 def cmd_providers(args: argparse.Namespace) -> int:
     from jev_change_monitor.providers.jev_command import JevCommandProvider
+    from jev_change_monitor.providers.jev_evaluate import JevEvaluateProvider
     from jev_change_monitor.providers.jev_http import JevHttpProvider
 
-    listed = [JevHttpProvider(), JevCommandProvider()]
+    listed = [JevHttpProvider(), JevEvaluateProvider(), JevCommandProvider()]
     for provider in listed:
         describe = provider.describe()
         print(json.dumps({"name": provider.name, "configured": provider.configured,
@@ -447,14 +454,15 @@ def cmd_blocked_live(args: argparse.Namespace) -> int:
 
     from jev_change_monitor import __version__
     from jev_change_monitor.providers.jev_command import JevCommandProvider
+    from jev_change_monitor.providers.jev_evaluate import JevEvaluateProvider
     from jev_change_monitor.providers.jev_http import JevHttpProvider
 
     accounting = dataset.split_accounting("held_out")
     frozen_ok, frozen_reason = thresholds_mod.check_frozen()
-    providers = [JevHttpProvider(), JevCommandProvider()]
+    providers = [JevHttpProvider(), JevEvaluateProvider(), JevCommandProvider()]
     reasons = [
-        "no authorized live Jev runtime configured (JEV_ENDPOINT/JEV_API_KEY/JEV_COMMAND all unset); "
-        "semantic thresholds (replynodes/replynodes-fetcher#487) are unverified",
+        "no authorized live Jev runtime configured (JEV_ENDPOINT/JEV_API_KEY/JEV_COMMAND/JEV_PROTOCOL "
+        "all unset); semantic thresholds (replynodes/replynodes-fetcher#487) are unverified",
         "deterministic-baseline numbers are pipeline evidence only and must not be presented as "
         "launch evidence",
         "held-out labels are rubric drafts with review_status 'pending-independent-review'; "
@@ -485,7 +493,8 @@ def cmd_blocked_live(args: argparse.Namespace) -> int:
             "model": None,
             "endpoint_configured": providers[0].describe()["endpoint_configured"],
             "api_key_configured": providers[0].describe()["api_key_configured"],
-            "command_configured": providers[1].describe()["command_configured"],
+            "command_configured": providers[2].describe()["command_configured"],
+            "evaluate_protocol_configured": providers[1].describe()["protocol_env"],
             "notes": "No authorized Jev runtime was available when this artifact was written.",
         },
         "evaluation_kind": "live-jev-blocked",
@@ -572,7 +581,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_bench = sub.add_parser("benchmark", help="run the detector benchmark")
     p_bench.add_argument("--split", choices=["held_out", "dev"], default="held_out")
-    p_bench.add_argument("--provider", choices=["heuristic", "jev-command", "jev-http"],
+    p_bench.add_argument("--provider", choices=["heuristic", "jev-command", "jev-http",
+                                                "jev-evaluate"],
                          default="heuristic")
     p_bench.add_argument("--out", default=None)
     p_bench.add_argument("--fault-injection-rate", type=float, default=0.0,
@@ -597,7 +607,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_demo = sub.add_parser("demo", help="run an example case through a provider")
     p_demo.add_argument("--detector", choices=list(VALID_DETECTORS), default=None)
-    p_demo.add_argument("--provider", choices=["heuristic", "jev-command", "jev-http"],
+    p_demo.add_argument("--provider", choices=["heuristic", "jev-command", "jev-http",
+                                               "jev-evaluate"],
                         default="heuristic")
     p_demo.set_defaults(func=cmd_demo)
 

@@ -52,6 +52,38 @@ jev-monitor webhook-demo                      # signed sender -> receiver roundt
 jev-monitor blocked-live                      # BLOCKED probe -> gitignored results/runs/
 ```
 
+Live Jev via the typed `/v1/evaluate` protocol (provider `jev-evaluate`):
+
+```sh
+export JEV_ENDPOINT=https://ai-gateway.vercel.sh/v1/evaluate
+export JEV_API_KEY=change-me                  # env-only, never logged
+export JEV_MODEL=typesafe-ai/jev
+export JEV_PROTOCOL=evaluate                  # protocol gate for the evaluate provider
+jev-monitor demo --provider jev-evaluate      # smoke: 3 example cases
+jev-monitor benchmark --split dev --provider jev-evaluate --out results/runs/live-jev-dev.json
+jev-monitor benchmark --split held_out --provider jev-evaluate --out results/runs/live-jev-held_out.json
+```
+
+The evaluate provider sends `{model, state, questions}` to `JEV_ENDPOINT`
+(the `/v1/evaluate` contract — the endpoint has no chat completions surface),
+with bounded normalized before/after state and detector-specific typed
+questions. Typed answers (`boolean`/`noul`/`choice`/`score`) map into
+`schemas/detector-result.schema.json`; an answer that cannot be mapped safely
+is recorded as `schema_invalid`/`provider` error rather than fabricating
+fields (see `docs/benchmark-methodology.md`). For the `price` detector the
+provider adds three dynamic `choice` extraction questions whose criteria come
+only from bounded candidate price tokens in the normalized evidence, and maps
+them deterministically into the required `details.extraction` (`amount`,
+`currency`, `period`, `amount_before`, `currency_before`, `direction`) — an
+amount is never invented. Socket/read timeouts are classified separately as
+`timeout` with bounded backoff; HTTP 429 stays a bounded rate-limit provider
+error (bounded `Retry-After`: clamped to 60s, 1s default when absent or
+malformed); any other HTTP 4xx/5xx and any non-timeout
+connection/other error stops immediately without a useless re-send. A success
+after retry(s) records the real `retries = attempt - 1` in the artifact.
+`jev-http` remains the chat-completions protocol and refuses to run
+when `JEV_PROTOCOL=evaluate`.
+
 Docker:
 
 ```sh
@@ -87,6 +119,25 @@ The launch thresholds from #487 are **not** passed by this repository today:
   `--committed` with an explicit `--out` under `results/committed/`.
 - Held-out labels are rubric drafts pending independent human
   review/adjudication, which is a separate launch blocker.
+- Live `jev-evaluate` held-out runs observe real metrics but do not meet the
+  frozen #487 thresholds, so `launch_claim.status` stays `failed` — never
+  `passed`. The most recent run (gitignored `results/runs/live-jev-*.json`,
+  111 cases, 105 evaluable) failed **all six** frozen threshold checks:
+  1. price `exact_price_accuracy` **0.879** < 0.95 (min), measured over the
+     exact 33-row extraction denominator (`price_cases_with_expectation`;
+     amount 31/33, currency 32/33, direction 30/33);
+  2. price `false_change_rate` **0.077** > 0.02 (max);
+  3. saas_pricing `precision` **0.875** < 0.90 (min);
+  4. saas_pricing `false_alert_rate` **0.231** > 0.10 (max);
+  5. product_change `precision` **0.824** < 0.90 (min);
+  6. product_change `false_alert_rate` **0.176** > 0.10 (max).
+  Six of the 111 cases were bounded provider errors (all HTTP 503,
+  `retries=0`) — recorded as honest `provider`-category rows with truthful
+  retry counts, never fake semantic results — and the artifact records the
+  evaluable subset (105) explicitly. The dev split ran 15/15 evaluable with
+  zero provider errors and failed only the frozen price `exact_price_accuracy`
+  check (0.8 < 0.95); both live artifacts keep `launch_claim.status =
+  "failed"` and never claim `passed`.
 
 `jev-monitor gate --result <artifact>` tells you the launch claim for any
 artifact and refuses `PASS` while any launch blocker (missing live Jev run,

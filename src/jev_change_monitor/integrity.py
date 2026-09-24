@@ -33,6 +33,26 @@ These are integration/repro checks over the *committed* tree, not unit tests:
    exception detail, or credential text — while keeping
    `error_category = \"provider\"` so provider-error metrics stay wired.
    Loopback port 1 keeps the probe deterministic and network-free.
+6. Price extraction mapping — the `price` detector's dynamic `choice`
+   extraction questions must derive their criteria from the actual bounded
+   candidate price tokens of the committed example (`examples/price/case.json`),
+   the three answers must map deterministically into a schema-valid
+   `details.extraction`, unmappable choices / missing contexts must fail as
+   `schema_invalid` with the failing answer id named (amounts never
+   invented), sentinels map to null extraction fields, and non-price
+   detectors must never emit `details.extraction`. Pure `map_answers`, no
+   network.
+7. Timeout classification — a real socket read timeout against a local
+   loopback server that accepts and stalls must be classified
+   `error_category = \"timeout\"` with a bounded withheld `provider_error`,
+   bounded retry/backoff, and never a fabricated result; endpoint/credential
+   fragments must not leak. Loopback-only and deterministic.
+8. jev-http protocol refusal — with `JEV_PROTOCOL=evaluate` set, the
+   chat-completions `jev-http` provider must refuse to run (the protocol
+   mismatch is the only blocker): `judge()` records a bounded
+   `provider`-category error naming both providers, never echoes the
+   endpoint or credential text, and unsetting `JEV_PROTOCOL` restores the
+   normal configured path. Deterministic and network-free.
 
 `jev-monitor validate` runs the same checks; `jev-monitor redact-check` is the
 standalone deterministic entry point.
@@ -459,6 +479,933 @@ def http_provider_probe() -> list[str]:
     return problems
 
 
+def evaluate_provider_probe() -> list[str]:
+    """Poison JEV_ENDPOINT/JEV_API_KEY/JEV_PROTOCOL and check typed-answer mapping.
+
+    Deterministic CLI/artifact inspection (not a unit test), mirroring
+    `http_provider_probe` and `command_value_probe`:
+
+    1. Poison env — a fully configured `JevEvaluateProvider` must never echo
+       the endpoint URL or API key from `describe()`, and a real
+       connection-refused `judge()` over loopback port 1 must record only a
+       bounded, withheld `provider_error` (never endpoint fragments, never
+       credential text, `error_category = "provider"`).
+    2. Protocol gates — `JEV_PROTOCOL=evaluate` with a chat-completions-style
+       URL must be refused with a bounded message that never echoes the URL;
+       `JEV_PROTOCOL=<other>` must report the provider as unconfigured.
+    3. Typed-answer mapping contract (pure `map_answers`, no network) — fully
+       typed payloads map to a schema-valid detector result with
+       `confidence_source = "jev-raw-probability"`; boolean answers carrying
+       only a probability map via the documented >= 0.5 rule; exact usage/cost
+       numbers pass through; unmappable answers (missing answer, `noul`
+       abstention, choice outside the allowed set, score outside [0,1],
+       missing answers envelope) are recorded as
+       `schema_invalid`/`provider` errors with result=None — fields are never
+       fabricated.
+    """
+    import os
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_evaluate import (
+        JevEvaluateProvider,
+        map_answers,
+    )
+
+    problems: list[str] = []
+    tokens = (_HTTP_ENDPOINT_POISON, _HTTP_API_KEY_POISON,
+              _HTTP_SK_TOKEN, _HTTP_RN_TOKEN, _HTTP_AKIA_TOKEN,
+              _HTTP_BEARER_HEADER_SHAPE)
+    _EVAL_ENDPOINT_POISON = (
+        "http://127.0.0.1:1/v1/evaluate?token=" + _HTTP_SK_TOKEN
+        + "&key=" + _HTTP_RN_TOKEN
+        + "&aws=" + _HTTP_AKIA_TOKEN
+    )
+    _EVAL_ENDPOINT_FRAGMENTS = ("http://127.0.0.1", "/v1/evaluate")
+
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL", "JEV_PROTOCOL")}
+    try:
+        # --- poisoned env: endpoint/key must never leak; judge() over closed
+        # loopback port 1 records a bounded withheld error ---
+        os.environ["JEV_ENDPOINT"] = _EVAL_ENDPOINT_POISON
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+
+        provider = JevEvaluateProvider()
+        if not provider.configured:
+            problems.append("evaluate probe: poison env did not configure the provider")
+
+        describe_blob = json.dumps(provider.describe(), sort_keys=True)
+        for token in tokens:
+            if token in describe_blob:
+                problems.append("evaluate probe: raw endpoint/api-key text reached describe()")
+
+        case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+        request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+        response = provider.judge(get_detector("price"), request)
+        if response.error_category != "provider":
+            problems.append(
+                "evaluate probe: provider failures must keep error_category='provider' "
+                "(provider-error metrics stay wired)"
+            )
+        provider_error = response.provider_error or ""
+        for token in tokens:
+            if token in provider_error:
+                problems.append("evaluate probe: endpoint/credential text reached provider_error")
+        for fragment in _EVAL_ENDPOINT_FRAGMENTS:
+            if fragment in provider_error:
+                problems.append("evaluate probe: provider_error exposes endpoint URL fragments")
+        if "details withheld" not in provider_error:
+            problems.append(
+                f"evaluate probe: provider_error must be a bounded withheld category, "
+                f"got {provider_error!r}"
+            )
+
+        # --- protocol gate: chat-completions URL must be refused, bounded ---
+        os.environ["JEV_ENDPOINT"] = _HTTP_ENDPOINT_POISON  # /chat/completions + tokens
+        chat_guard = JevEvaluateProvider().judge(get_detector("price"), request)
+        chat_error = chat_guard.provider_error or ""
+        if "chat-completions" not in chat_error:
+            problems.append(
+                f"evaluate probe: chat-completions URL must be refused with a bounded "
+                f"message, got {chat_error!r}"
+            )
+        # The guard must never echo the configured endpoint: no credential
+        # tokens, no scheme/host fragments. (The literal protocol path
+        # "/v1/evaluate" is allowed as a protocol name in the message, so it
+        # is not treated as a leak.)
+        for token in tokens + ("http://", "127.0.0.1", "/chat/completions"):
+            if token in chat_error:
+                problems.append("evaluate probe: chat-guard message echoed the endpoint")
+
+        # --- protocol gate: non-evaluate JEV_PROTOCOL reports unconfigured ---
+        os.environ["JEV_ENDPOINT"] = _EVAL_ENDPOINT_POISON
+        os.environ["JEV_PROTOCOL"] = "chat"
+        if JevEvaluateProvider().configured:
+            problems.append("evaluate probe: JEV_PROTOCOL != evaluate must not configure the provider")
+
+        # --- typed-answer mapping contract (pure, no network) ---
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+        meta = {"evidence_normalized": True, "evidence_truncated": True,
+                "evidence_cap_chars": 64000}
+        from jev_change_monitor.schemas import validate_schema
+
+        # Mixed native + gateway answer shapes: noul (native), boolean with
+        # probability (verified gateway example), choice with `choice` key,
+        # score with `confidence`.
+        payload_ok = {
+            "model": "typesafe-ai/jev",
+            "usage": {"input_tokens": 1200, "output_tokens": 90, "total_cost_usd": 0.0042},
+            "answers": {
+                "valid": {"type": "noul", "noul": 0.99},
+                "meaningful": {"type": "boolean", "probability": 0.85},
+                "change_type": {"type": "choice", "choice": "price_increase",
+                                "probabilities": {"price_increase": 1.0}},
+                "importance": {"type": "choice", "value": "high"},
+                "should_alert": {"type": "boolean", "probability": 0.8},
+                "confidence": {"type": "score", "score": 3.0, "confidence": 0.75},
+            },
+        }
+        ok = map_answers(payload_ok, get_detector("price"), meta)
+        if not ok.schema_valid or ok.error_category != "none":
+            problems.append(f"evaluate probe: fully-typed payload must map cleanly: "
+                            f"{ok.provider_error!r}")
+        if ok.result is None:
+            problems.append("evaluate probe: fully-typed payload produced no result")
+        else:
+            result = ok.result
+            if not (result["valid"] is True and result["meaningful"] is True
+                    and result["should_alert"] is True):
+                problems.append("evaluate probe: boolean/noul mapping wrong for fully-typed payload")
+            if result["change_type"] != "price_increase" or result["importance"] != "high":
+                problems.append("evaluate probe: choice mapping wrong for fully-typed payload")
+            if result["confidence"] != 0.8 or result["confidence_source"] != "jev-raw-probability":
+                problems.append("evaluate probe: raw-probability confidence mapping wrong "
+                                "(expected should_alert probability 0.8)")
+            schema_errors = validate_schema(result, "detector-result")
+            if schema_errors:
+                problems.append(f"evaluate probe: mapped result schema-invalid: "
+                                f"{'; '.join(schema_errors)}")
+            usage = ok.usage.get("provider_usage", {})
+            if usage.get("input_tokens") != 1200 or usage.get("total_cost_usd") != 0.0042:
+                problems.append("evaluate probe: exact usage/cost numbers must pass through")
+
+        # boolean-family answer with only a probability: documented >= 0.5 rule
+        payload_prob = {
+            "answers": {
+                "valid": {"type": "boolean", "value": True},
+                "meaningful": {"type": "noul", "noul": 0.3},
+                "change_type": {"type": "choice", "value": "none"},
+                "importance": {"type": "choice", "value": "low"},
+                "should_alert": {"type": "boolean", "probability": 0.7},
+            },
+        }
+        prob = map_answers(payload_prob, get_detector("price"), meta)
+        if not prob.schema_valid or prob.result is None:
+            problems.append("evaluate probe: probability-only boolean payload failed to map")
+        else:
+            if prob.result["meaningful"] is not False:
+                problems.append("evaluate probe: probability-only boolean must map via >= 0.5 rule")
+            if prob.result["should_alert"] is not True:
+                problems.append("evaluate probe: probability-only boolean must map via >= 0.5 rule")
+
+        # unmappable cases must never fabricate fields
+        unmappable_cases = [
+            ("missing should_alert",
+             {"answers": {k: v for k, v in payload_ok["answers"].items()
+                          if k != "should_alert"}},
+             "schema_invalid", "should_alert"),
+            ("unknown answer type on meaningful",
+             {"answers": {**payload_ok["answers"],
+                          "meaningful": {"type": "text", "value": "probably"}}},
+             "schema_invalid", "meaningful"),
+            ("choice outside allowed set",
+             {"answers": {**payload_ok["answers"],
+                          "change_type": {"type": "choice", "value": "price_removed_typo"}}},
+             "schema_invalid", "change_type"),
+            ("score answer without usable confidence",
+             {"answers": {**payload_ok["answers"],
+                          "confidence": {"type": "score", "score": 3.0},
+                          "should_alert": {"type": "boolean", "value": True},
+                          "meaningful": {"type": "boolean", "value": True}}},
+             "schema_invalid", "confidence"),
+            ("missing answers envelope",
+             {"result": "text"},
+             "provider", "answers"),
+        ]
+        for name, payload, expected_category, expected_token in unmappable_cases:
+            got = map_answers(payload, get_detector("price"), meta)
+            if got.schema_valid is not False or got.error_category != expected_category:
+                problems.append(
+                    f"evaluate probe: {name} must record error_category={expected_category}, "
+                    f"got schema_valid={got.schema_valid} category={got.error_category!r}"
+                )
+            if got.result is not None:
+                problems.append(f"evaluate probe: {name} must NOT fabricate a result")
+            if expected_token not in (got.provider_error or ""):
+                problems.append(
+                    f"evaluate probe: {name} provider_error must name {expected_token!r}, "
+                    f"got {got.provider_error!r}"
+                )
+    finally:
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
+def evaluate_http_protocol_probe() -> list[str]:
+    """Poison env and check jev-http's JEV_PROTOCOL=evaluate refusal gate.
+
+    Deterministic CLI inspection (not a unit test), mirroring
+    `http_provider_probe` / `evaluate_provider_probe`:
+
+    1. Protocol gate — with `JEV_PROTOCOL=evaluate` set and a fully
+       configured chat-completions `JEV_ENDPOINT` + `JEV_API_KEY`, the
+       `jev-http` provider must refuse to run: `protocol_mismatch` non-null,
+       `configured` False, and a real `judge()` call must return a bounded
+       `provider`-category error naming both providers — never endpoint
+       fragments, never credential text, `result=None`.
+    2. The refusal must be the ONLY blocker — with `JEV_PROTOCOL` unset the
+       same env configures the provider (`protocol_mismatch` None,
+       `configured` True), so the gate cannot silently disable the
+       chat-completions path by accident.
+    """
+    import os
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_http import JevHttpProvider
+
+    problems: list[str] = []
+    tokens = (_HTTP_ENDPOINT_POISON, _HTTP_API_KEY_POISON,
+              _HTTP_SK_TOKEN, _HTTP_RN_TOKEN, _HTTP_AKIA_TOKEN,
+              _HTTP_BEARER_HEADER_SHAPE)
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL", "JEV_PROTOCOL")}
+    try:
+        os.environ["JEV_ENDPOINT"] = _HTTP_ENDPOINT_POISON
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+
+        provider = JevHttpProvider()
+        if provider.protocol_mismatch is None:
+            problems.append(
+                "http-protocol probe: JEV_PROTOCOL=evaluate must set protocol_mismatch on jev-http"
+            )
+        if provider.configured:
+            problems.append(
+                "http-protocol probe: JEV_PROTOCOL=evaluate must not configure jev-http"
+            )
+
+        describe_blob = json.dumps(provider.describe(), sort_keys=True)
+        for token in tokens:
+            if token in describe_blob:
+                problems.append("http-protocol probe: raw endpoint/api-key text reached describe()")
+
+        case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+        request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+        response = provider.judge(get_detector("price"), request)
+        if response.error_category != "provider":
+            problems.append(
+                "http-protocol probe: the protocol refusal must keep error_category='provider' "
+                "(provider-error metrics stay wired)"
+            )
+        if response.schema_valid is not False or response.result is not None:
+            problems.append(
+                "http-protocol probe: the protocol refusal must never fabricate a result"
+            )
+        provider_error = response.provider_error or ""
+        if "jev-evaluate" not in provider_error or "jev-http" not in provider_error:
+            problems.append(
+                f"http-protocol probe: refusal message must name both providers, "
+                f"got {provider_error!r}"
+            )
+        if "chat-completions" not in provider_error:
+            problems.append(
+                f"http-protocol probe: refusal message must name the chat-completions protocol, "
+                f"got {provider_error!r}"
+            )
+        for token in tokens:
+            if token in provider_error:
+                problems.append(
+                    "http-protocol probe: endpoint/credential text reached provider_error"
+                )
+        for fragment in _HTTP_ENDPOINT_FRAGMENTS:
+            if fragment in provider_error:
+                problems.append("http-protocol probe: provider_error exposes endpoint URL fragments")
+
+        # The refusal must be the ONLY blocker: the same env without the
+        # protocol variable configures the chat-completions provider normally.
+        os.environ.pop("JEV_PROTOCOL", None)
+        if JevHttpProvider().protocol_mismatch is not None:
+            problems.append(
+                "http-protocol probe: unset JEV_PROTOCOL must not report a protocol mismatch"
+            )
+        if not JevHttpProvider().configured:
+            problems.append(
+                "http-protocol probe: unset JEV_PROTOCOL with endpoint+key must configure jev-http"
+            )
+    finally:
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
+def extraction_mapping_probe() -> list[str]:
+    """Deterministic price-extraction mapping probe (pure, no network).
+
+    Mirrors `evaluate_provider_probe`'s pure `map_answers` section for the P2
+    price-extraction contract: builds the bounded candidate context exactly as
+    the live path does from the committed `examples/price/case.json`, then
+    proves:
+
+    1. question bank wiring — the price detector carries the three typed
+       `choice` extraction questions (`price_after` / `price_before` /
+       `price_direction`) and their criteria derive from the actual candidate
+       price tokens in the bounded evidence plus the fixed sentinels; non-price
+       detectors carry none of them;
+    2. deterministic mapping — a fully-typed answers payload maps to a
+       schema-valid result whose `details.extraction` carries exactly the
+       chosen candidate fields plus the direction, never invented; two runs are
+       byte-identical; usage records the bounded candidate counts;
+    3. failure discipline — a choice outside the bounded candidate set or a
+       missing `price_direction` is `schema_invalid` with the failing answer id
+       named and `result=None`; sentinel choices map to null extraction fields;
+       a price payload with extraction answers but no candidate context fails
+       instead of silently dropping the extraction;
+    4. non-price detectors never emit `details.extraction`.
+    """
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.normalize import extract_price_tokens
+    from jev_change_monitor.providers.base import bounded_evidence
+    from jev_change_monitor.providers.jev_evaluate import (
+        _MAX_PRICE_CANDIDATES,
+        _price_token_key,
+        map_answers,
+        price_extraction_questions,
+        question_bank,
+    )
+    from jev_change_monitor.schemas import validate_schema
+
+    problems: list[str] = []
+    case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+    request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+    evidence, _ = bounded_evidence(request)
+    questions, context = price_extraction_questions(evidence)
+
+    # --- 1. question bank wiring -----------------------------------------
+    for qid in ("price_after", "price_before", "price_direction"):
+        question = questions.get(qid)
+        if question is None or question.get("type") != "choice":
+            problems.append(f"extraction probe: price question {qid!r} must be a choice")
+            continue
+        criteria = question.get("criteria") or {}
+        if qid != "price_direction" and not all(s in criteria for s in ("no_price_token", "unclear")):
+            problems.append(f"extraction probe: {qid} criteria must include the fixed sentinels")
+    non_price = question_bank(get_detector("saas_pricing"))
+    if any(qid.startswith("price_") for qid in non_price):
+        problems.append("extraction probe: non-price detector carries price extraction questions")
+
+    # criteria must derive from the actual bounded candidate tokens
+    for side in ("before", "after"):
+        keys: set[str] = set()
+        seen: set[str] = set()
+        for token in extract_price_tokens(evidence[side]):
+            key = _price_token_key(token)
+            if key in seen:
+                continue
+            seen.add(key)
+            if len(keys) >= _MAX_PRICE_CANDIDATES:
+                break
+            keys.add(key)
+        qid = "price_after" if side == "after" else "price_before"
+        criteria = set((questions.get(qid) or {}).get("criteria") or {})
+        missing = keys - criteria
+        if missing:
+            problems.append(f"extraction probe: {side} candidate keys missing from criteria: {sorted(missing)[:3]}")
+        context_keys = set((context.get(side) or {}).keys())
+        if not keys.issubset(context_keys):
+            problems.append(f"extraction probe: {side} candidate context does not cover the criteria")
+    # the committed example's canonical tokens ($39 after, $29 before)
+    after_criteria = set((questions.get("price_after") or {}).get("criteria") or {})
+    before_criteria = set((questions.get("price_before") or {}).get("criteria") or {})
+    if "amt:39|cur:USD|per:mo" not in after_criteria:
+        problems.append("extraction probe: after-state $39 token missing from criteria")
+    if "amt:29|cur:USD|per:mo" not in before_criteria:
+        problems.append("extraction probe: before-state $29 token missing from criteria")
+    direction_criteria = set((questions.get("price_direction") or {}).get("criteria") or {})
+    if direction_criteria != {"up", "down", "unchanged", "unknown"}:
+        problems.append("extraction probe: price_direction criteria must be exactly up/down/unchanged/unknown")
+
+    probe_meta = {
+        "evidence_normalized": True,
+        "evidence_truncated": False,
+        "evidence_cap_chars": 64000,
+        "price_candidates_after": len(context["after"]),
+        "price_candidates_before": len(context["before"]),
+        "price_candidates_truncated": bool(context["truncated"]),
+    }
+
+    def base_answers(**overrides) -> dict:
+        answers = {
+            "valid": {"type": "boolean", "value": True},
+            "meaningful": {"type": "boolean", "value": True},
+            "change_type": {"type": "choice", "value": "price_increase"},
+            "importance": {"type": "choice", "value": "high"},
+            "should_alert": {"type": "boolean", "value": True},
+            "confidence": {"type": "score", "score": 3.0, "confidence": 0.8},
+        }
+        answers.update(overrides)
+        return answers
+
+    ok_payload = {"answers": base_answers(
+        price_after={"type": "choice", "choice": "amt:39|cur:USD|per:mo"},
+        price_before={"type": "choice", "choice": "amt:29|cur:USD|per:mo"},
+        price_direction={"type": "choice", "choice": "up"},
+    )}
+
+    # --- 2. deterministic mapping into details.extraction ----------------
+    ok = map_answers(ok_payload, get_detector("price"), probe_meta, price_extraction=context)
+    if not ok.schema_valid or ok.error_category != "none" or ok.result is None:
+        problems.append(f"extraction probe: fully-typed price payload must map cleanly: {ok.provider_error!r}")
+    else:
+        extraction = ok.result.get("details", {}).get("extraction")
+        expected = {"amount": 39.0, "currency": "USD", "period": "mo",
+                    "amount_before": 29.0, "currency_before": "USD", "direction": "up"}
+        if extraction != expected:
+            problems.append(f"extraction probe: mapping produced {extraction!r}, expected {expected!r}")
+        schema_errors = validate_schema(ok.result, "detector-result")
+        if schema_errors:
+            problems.append(f"extraction probe: mapped result schema-invalid: {'; '.join(schema_errors)}")
+    again = map_answers(ok_payload, get_detector("price"), probe_meta, price_extraction=context)
+    if json.dumps(ok.result, sort_keys=True) != json.dumps(again.result, sort_keys=True):
+        problems.append("extraction probe: mapping is not deterministic")
+    if ok.usage.get("price_candidates_after") != len(context["after"]):
+        problems.append("extraction probe: usage must record the bounded after-candidate count")
+
+    # --- 3. unmappable / sentinel / wiring guard -------------------------
+    unmappable_cases = [
+        ("choice outside the bounded candidate set",
+         {"price_after": {"type": "choice", "value": "amt:999.0|cur:USD|per:none"}},
+         "price_after"),
+        ("missing price_direction",
+         {"price_after": {"type": "choice", "value": "amt:39|cur:USD|per:mo"},
+          "price_before": {"type": "choice", "value": "amt:29|cur:USD|per:mo"}},
+         "price_direction"),
+    ]
+    for name, overrides, token in unmappable_cases:
+        got = map_answers({"answers": base_answers(**overrides)}, get_detector("price"),
+                          probe_meta, price_extraction=context)
+        if got.schema_valid is not False or got.error_category != "schema_invalid":
+            problems.append(f"extraction probe: {name} must record schema_invalid")
+        if got.result is not None:
+            problems.append(f"extraction probe: {name} must NOT fabricate a result")
+        if token not in (got.provider_error or ""):
+            problems.append(
+                f"extraction probe: {name} provider_error must name {token!r}, got {got.provider_error!r}"
+            )
+
+    sentinel_payload = {"answers": base_answers(
+        meaningful={"type": "boolean", "value": False},
+        change_type={"type": "choice", "value": "none"},
+        importance={"type": "choice", "value": "low"},
+        should_alert={"type": "boolean", "value": False},
+        price_after={"type": "choice", "value": "no_price_token"},
+        price_before={"type": "choice", "value": "no_price_token"},
+        price_direction={"type": "choice", "value": "unknown"},
+    )}
+    sentinel = map_answers(sentinel_payload, get_detector("price"), probe_meta, price_extraction=context)
+    if not sentinel.schema_valid or sentinel.result is None:
+        problems.append("extraction probe: sentinel-only payload must map cleanly")
+    else:
+        extraction = sentinel.result.get("details", {}).get("extraction")
+        if extraction != {"amount": None, "currency": None, "period": None,
+                          "amount_before": None, "currency_before": None, "direction": "unknown"}:
+            problems.append(f"extraction probe: sentinel mapping unexpected: {extraction!r}")
+
+    guard = map_answers(ok_payload, get_detector("price"), probe_meta)
+    if guard.schema_valid is not False or "candidate context is unavailable" not in (guard.provider_error or ""):
+        problems.append("extraction probe: price answers without a candidate context must fail")
+
+    # --- 4. non-price detectors never emit extraction ---------------------
+    saas_payload = {"answers": {
+        "valid": {"type": "boolean", "value": True},
+        "meaningful": {"type": "boolean", "value": False},
+        "change_type": {"type": "choice", "value": "none"},
+        "importance": {"type": "choice", "value": "low"},
+        "should_alert": {"type": "boolean", "value": False},
+        "confidence": {"type": "score", "score": 2.0, "confidence": 0.6},
+    }}
+    saas = map_answers(saas_payload, get_detector("saas_pricing"), probe_meta)
+    if (saas.result or {}).get("details", {}).get("extraction") is not None:
+        problems.append("extraction probe: non-price detectors must not emit details.extraction")
+    return problems
+
+
+def timeout_classification_probe() -> list[str]:
+    """Deterministic socket/read-timeout classification probe (loopback only).
+
+    A local TCP server accepts the provider's POST and then stalls (never
+    responds), forcing a real socket read timeout with a short client timeout.
+    `JevEvaluateProvider.judge` must classify the failure as
+    `error_category = \"timeout\"`, keep a bounded withheld `provider_error`
+    (no endpoint host, no credential text), never fabricate a result, and
+    report the exhausted retry count. `retries=1` exercises the bounded
+    retry/backoff path (two attempts, both timing out). The server is
+    loopback-only, so the probe never touches the external network.
+    """
+    import os
+    import socket
+    import threading
+    import time
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_evaluate import JevEvaluateProvider
+
+    problems: list[str] = []
+    case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+    request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL", "JEV_PROTOCOL")}
+    listen_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listen_sock.bind(("127.0.0.1", 0))
+        listen_sock.listen(4)
+        port = listen_sock.getsockname()[1]
+        os.environ["JEV_ENDPOINT"] = f"http://127.0.0.1:{port}/v1/evaluate"
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+
+        def stall_accept() -> None:
+            """Accept up to 3 connections; never respond to any of them."""
+            for _ in range(3):
+                try:
+                    conn, _addr = listen_sock.accept()
+                except OSError:
+                    return
+
+                def drain(c: socket.socket) -> None:
+                    try:
+                        c.settimeout(2.0)
+                        try:
+                            while c.recv(65536):
+                                pass
+                        except OSError:
+                            pass
+                        time.sleep(4.0)
+                    except OSError:
+                        pass
+                    finally:
+                        try:
+                            c.close()
+                        except OSError:
+                            pass
+
+                threading.Thread(target=drain, args=(conn,), daemon=True).start()
+
+        threading.Thread(target=stall_accept, daemon=True).start()
+
+        response = JevEvaluateProvider(timeout_s=0.4, retries=1).judge(get_detector("price"), request)
+        if response.error_category != "timeout":
+            problems.append(
+                f"timeout probe: socket/read timeout must classify error_category='timeout', "
+                f"got {response.error_category!r}"
+            )
+        if "timeout" not in (response.provider_error or "").lower():
+            problems.append(
+                f"timeout probe: provider_error must be a bounded timeout message, "
+                f"got {response.provider_error!r}"
+            )
+        if "127.0.0.1" in (response.provider_error or ""):
+            problems.append("timeout probe: provider_error leaked the endpoint host")
+        if _HTTP_API_KEY_POISON in (response.provider_error or ""):
+            problems.append("timeout probe: provider_error leaked credential text")
+        if response.result is not None or response.schema_valid:
+            problems.append("timeout probe: a timed-out judge must not fabricate a result")
+        if response.retries != 1:
+            problems.append(f"timeout probe: expected retries=1 for two exhausted attempts, got {response.retries}")
+    finally:
+        try:
+            listen_sock.close()
+        except OSError:
+            pass
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
+def retry_semantics_probe() -> list[str]:
+    """Deterministic retry-semantics probe (loopback only, no network).
+
+    A scripted loopback TCP server proves the documented retry contract of
+    `JevEvaluateProvider.judge` (docs/benchmark-methodology.md), covering the
+    independent-review P2 findings without unit tests:
+
+    1. HTTP 429 (rate limit) is retried with the bounded Retry-After backoff
+       (here 0.05s) and a later success records `retries = attempt - 1` in
+       the returned ProviderResponse and its artifact record (never 0).
+    2. A socket/read timeout is retried with the bounded backoff and a later
+       success likewise records `retries = attempt - 1`.
+    3. A non-retryable HTTP status (503) is recorded immediately: the server
+       observes exactly ONE connection despite `retries=2`, and the response
+       is a bounded `provider`-category error (`HTTP 503`), `retries == 0`,
+       no fabricated result.
+    4. A non-timeout connection failure (connection refused) is recorded
+       immediately: `retries == 0`, bounded withheld `provider_error`, no
+       fabricated result.
+    5. A `Retry-After` value above the 60s cap is clamped to the cap rather
+       than silently reduced to the 1s default; malformed/absent values use
+       the 1s default.
+    """
+    import os
+    import socket
+    import threading
+    import time
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_evaluate import (
+        JevEvaluateProvider,
+        _bounded_retry_after,
+    )
+
+    problems: list[str] = []
+    case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+    request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+
+    ok_payload = {
+        "model": "jev-probe-model",
+        "answers": {
+            "valid": {"type": "boolean", "value": True},
+            "meaningful": {"type": "boolean", "value": True},
+            "change_type": {"type": "choice", "value": "price_increase"},
+            "importance": {"type": "choice", "value": "high"},
+            "should_alert": {"type": "boolean", "value": True},
+            "confidence": {"type": "score", "score": 3.0, "confidence": 0.9},
+            # judge() passes the bounded price candidate context for the price
+            # detector, so the extraction answers are required (same canonical
+            # candidate keys proven by extraction_mapping_probe).
+            "price_after": {"type": "choice", "value": "amt:39|cur:USD|per:mo"},
+            "price_before": {"type": "choice", "value": "amt:29|cur:USD|per:mo"},
+            "price_direction": {"type": "choice", "value": "up"},
+        },
+    }
+
+    def read_request(conn: socket.socket, timeout: float = 2.0) -> None:
+        """Consume the request (headers + Content-Length body) so the server
+        never races the client; small loopback bodies only."""
+        conn.settimeout(timeout)
+        data = b""
+        while b"\r\n\r\n" not in data:
+            try:
+                chunk = conn.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            data += chunk
+        head, _, _ = data.partition(b"\r\n\r\n")
+        length = 0
+        for line in head.split(b"\r\n"):
+            if line.lower().startswith(b"content-length:"):
+                try:
+                    length = int(line.split(b":", 1)[1].strip())
+                except ValueError:
+                    length = 0
+                break
+        left = length - (len(data) - len(head) - 4)
+        while left > 0:
+            try:
+                chunk = conn.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            left -= len(chunk)
+
+    def send_http(conn: socket.socket, status: bytes, body: bytes = b"",
+                  extra: bytes = b"") -> None:
+        conn.sendall(status + extra
+                     + b"Content-Length: " + str(len(body)).encode("ascii")
+                     + b"\r\nConnection: close\r\n\r\n" + body)
+
+    def run_server(behaviors: list[str]) -> tuple:
+        """Scripted loopback server; returns (port, connection_count, stop)."""
+        listen = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listen.bind(("127.0.0.1", 0))
+        listen.listen(8)
+        port = listen.getsockname()[1]
+        count: list[int] = [0]
+        stopped: list[bool] = [False]
+
+        def handle(conn: socket.socket, behavior: str) -> None:
+            try:
+                if behavior == "stall":
+                    # Accept, never respond: forces a real client read timeout.
+                    conn.settimeout(2.0)
+                    try:
+                        while conn.recv(65536):
+                            pass
+                    except OSError:
+                        pass
+                    time.sleep(4.0)
+                elif behavior == "ok":
+                    read_request(conn)
+                    send_http(conn, b"HTTP/1.1 200 OK\r\n",
+                              json.dumps(ok_payload).encode("utf-8"))
+                elif behavior == "ratelimit":
+                    read_request(conn)
+                    send_http(conn, b"HTTP/1.1 429 Too Many Requests\r\n",
+                              extra=b"Retry-After: 0.05\r\n")
+                elif behavior == "server_error":
+                    read_request(conn)
+                    send_http(conn, b"HTTP/1.1 503 Service Unavailable\r\n")
+            finally:
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+
+        def serve() -> None:
+            listen.settimeout(0.5)
+            while not stopped[0]:
+                try:
+                    conn, _addr = listen.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return
+                idx = count[0]
+                count[0] += 1
+                threading.Thread(
+                    target=handle,
+                    args=(conn, behaviors[min(idx, len(behaviors) - 1)]),
+                    daemon=True,
+                ).start()
+
+        threading.Thread(target=serve, daemon=True).start()
+
+        def stop() -> None:
+            stopped[0] = True
+            try:
+                listen.close()
+            except OSError:
+                pass
+
+        return port, count, stop
+
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL", "JEV_PROTOCOL")}
+    listeners: list = []
+    try:
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+
+        def endpoint_for(port: int) -> str:
+            return f"http://127.0.0.1:{port}/v1/evaluate"
+
+        # --- 1. HTTP 429 -> success: truthfully retried, retries=1 ----------
+        port, count, stop = run_server(["ratelimit", "ok"])
+        listeners.append(stop)
+        os.environ["JEV_ENDPOINT"] = endpoint_for(port)
+        after_429 = JevEvaluateProvider(timeout_s=2.0, retries=2).judge(
+            get_detector("price"), request)
+        stop()
+        if not after_429.schema_valid or after_429.error_category != "none":
+            problems.append(
+                f"retry probe: 429 -> success must yield a clean result, "
+                f"got {after_429.error_category!r} / {after_429.provider_error!r}"
+            )
+        if after_429.retries != 1:
+            problems.append(
+                f"retry probe: 429 -> success must record retries=1, "
+                f"got {after_429.retries}"
+            )
+        if after_429.to_record().get("retries") != 1:
+            problems.append("retry probe: artifact record must carry retries=1 after a retry")
+        if count[0] != 2:
+            problems.append(
+                f"retry probe: 429 -> success expected exactly 2 connections, "
+                f"got {count[0]}"
+            )
+
+        # --- 2. timeout -> success: truthfully retried, retries=1 ----------
+        port, count, stop = run_server(["stall", "ok"])
+        listeners.append(stop)
+        os.environ["JEV_ENDPOINT"] = endpoint_for(port)
+        after_timeout = JevEvaluateProvider(timeout_s=0.4, retries=2).judge(
+            get_detector("price"), request)
+        stop()
+        if not after_timeout.schema_valid or after_timeout.error_category != "none":
+            problems.append(
+                f"retry probe: timeout -> success must yield a clean result, "
+                f"got {after_timeout.error_category!r} / {after_timeout.provider_error!r}"
+            )
+        if after_timeout.retries != 1:
+            problems.append(
+                f"retry probe: timeout -> success must record retries=1, "
+                f"got {after_timeout.retries}"
+            )
+        if count[0] != 2:
+            problems.append(
+                f"retry probe: timeout -> success expected exactly 2 connections, "
+                f"got {count[0]}"
+            )
+
+        # --- 3. HTTP 503: NOT retried; exactly one connection --------------
+        port, count, stop = run_server(["server_error"])
+        listeners.append(stop)
+        os.environ["JEV_ENDPOINT"] = endpoint_for(port)
+        server_error = JevEvaluateProvider(timeout_s=2.0, retries=2).judge(
+            get_detector("price"), request)
+        stop()
+        if server_error.error_category != "provider":
+            problems.append(
+                f"retry probe: HTTP 503 must keep error_category='provider', "
+                f"got {server_error.error_category!r}"
+            )
+        if "HTTP 503" not in (server_error.provider_error or ""):
+            problems.append(
+                f"retry probe: HTTP 503 provider_error must be bounded 'HTTP 503', "
+                f"got {server_error.provider_error!r}"
+            )
+        if "429" in (server_error.provider_error or ""):
+            problems.append("retry probe: HTTP 503 error must not mention 429")
+        if server_error.retries != 0:
+            problems.append(
+                f"retry probe: non-retryable HTTP 503 must stop immediately "
+                f"(retries=0), got {server_error.retries}"
+            )
+        if count[0] != 1:
+            problems.append(
+                f"retry probe: non-retryable HTTP 503 must open exactly ONE "
+                f"connection, got {count[0]}"
+            )
+        if server_error.result is not None or server_error.schema_valid:
+            problems.append("retry probe: a 503 failure must not fabricate a result")
+
+        # --- 4. connection refused: NOT retried ----------------------------
+        os.environ["JEV_ENDPOINT"] = "http://127.0.0.1:1/v1/evaluate"
+        refused = JevEvaluateProvider(timeout_s=2.0, retries=2).judge(
+            get_detector("price"), request)
+        if refused.error_category != "provider":
+            problems.append(
+                f"retry probe: connection refused must keep error_category='provider', "
+                f"got {refused.error_category!r}"
+            )
+        if "URLError (details withheld)" not in (refused.provider_error or ""):
+            problems.append(
+                f"retry probe: connection-refused provider_error must be bounded "
+                f"withheld, got {refused.provider_error!r}"
+            )
+        if refused.retries != 0:
+            problems.append(
+                f"retry probe: connection refused must stop immediately "
+                f"(retries=0), got {refused.retries}"
+            )
+        if refused.result is not None or refused.schema_valid:
+            problems.append("retry probe: a refused connection must not fabricate a result")
+        if "127.0.0.1" in (refused.provider_error or ""):
+            problems.append("retry probe: connection-refused error leaked the endpoint host")
+
+        # --- 5. Retry-After clamping (P2-2): deterministic, network-free ---
+        class _FakeExc:
+            def __init__(self, headers: dict):
+                self.headers = headers
+
+        if _bounded_retry_after(_FakeExc({"Retry-After": "120"}),
+                                default=1.0, cap=60.0) != 60.0:
+            problems.append(
+                "retry probe: Retry-After above the cap must clamp to the cap "
+                "(60s), not silently fall back to the 1s default"
+            )
+        if _bounded_retry_after(_FakeExc({"Retry-After": "2"}),
+                                default=1.0, cap=60.0) != 2.0:
+            problems.append(
+                "retry probe: in-range Retry-After must pass through unchanged"
+            )
+        if _bounded_retry_after(_FakeExc({"Retry-After": "not-a-number"}),
+                                default=1.0, cap=60.0) != 1.0:
+            problems.append(
+                "retry probe: malformed Retry-After must use the 1s default"
+            )
+        if _bounded_retry_after(_FakeExc({}), default=1.0, cap=60.0) != 1.0:
+            problems.append("retry probe: absent Retry-After must use the 1s default")
+        if _bounded_retry_after(_FakeExc({"Retry-After": "-5"}),
+                                default=1.0, cap=60.0) != 1.0:
+            problems.append(
+                "retry probe: non-positive Retry-After must use the 1s default"
+            )
+    finally:
+        for stop in listeners:
+            stop()
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
 def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     """All deterministic integrity checks; one problem per list entry."""
     problems: list[str] = []
@@ -467,4 +1414,9 @@ def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     problems.extend(rubric_citations())
     problems.extend(command_value_probe())
     problems.extend(http_provider_probe())
+    problems.extend(evaluate_http_protocol_probe())
+    problems.extend(evaluate_provider_probe())
+    problems.extend(extraction_mapping_probe())
+    problems.extend(timeout_classification_probe())
+    problems.extend(retry_semantics_probe())
     return problems

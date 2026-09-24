@@ -1,5 +1,5 @@
 {
-  "artifact_sha256": "3515e5de75bfed370aba33a2d632e21f4894f55599bee17674dafaf9a0426012",
+  "artifact_sha256": "9a2a07e51f1ed1f49aed6bfe9cd882533b44597df8d86af786e224f993cb1886",
   "artifact_version": "1.0.0",
   "cases": [],
   "command": "jev-monitor blocked-live --committed --out results/committed/blocked/live-jev-blocked.json",
@@ -33,12 +33,12 @@
     "python": "3.12.13"
   },
   "evaluation_kind": "live-jev-blocked",
-  "generated_at": "2026-09-23T18:13:02+00:00",
+  "generated_at": "2026-09-24T07:02:56+00:00",
   "launch_claim": {
     "criteria_source": "replynodes/replynodes-fetcher#487",
     "failed_checks": 8,
     "reasons": [
-      "no authorized live Jev runtime configured (JEV_ENDPOINT/JEV_API_KEY/JEV_COMMAND all unset); semantic thresholds (replynodes/replynodes-fetcher#487) are unverified",
+      "no authorized live Jev runtime configured (JEV_ENDPOINT/JEV_API_KEY/JEV_COMMAND/JEV_PROTOCOL all unset); semantic thresholds (replynodes/replynodes-fetcher#487) are unverified",
       "deterministic-baseline numbers are pipeline evidence only and must not be presented as launch evidence",
       "held-out labels are rubric drafts with review_status 'pending-independent-review'; independent human review/adjudication of disputed cases has not been recorded"
     ],
@@ -104,6 +104,7 @@
     "api_key_configured": "not-configured",
     "command_configured": "not-configured",
     "endpoint_configured": "not-configured",
+    "evaluate_protocol_configured": "not-configured",
     "mode": "live",
     "model": null,
     "notes": "No authorized Jev runtime was available when this artifact was written.",

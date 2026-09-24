@@ -23,13 +23,17 @@
     "provider": {
       "type": "object",
       "required": ["provider", "mode"],
+      "additionalProperties": false,
       "properties": {
         "provider": { "type": "string" },
         "mode": { "enum": ["deterministic", "live"] },
         "model": { "type": ["string", "null"] },
+        "protocol": { "type": "string" },
+        "protocol_env": { "type": "string" },
         "endpoint_configured": { "type": ["string", "boolean"] },
         "api_key_configured": { "type": ["string", "boolean"] },
         "command_configured": { "type": ["string", "boolean"] },
+        "evaluate_protocol_configured": { "type": ["string", "boolean"] },
         "command_label": { "type": ["string", "null"] },
         "timeout_s": { "type": "number" },
         "retries": { "type": "integer", "minimum": 0 },
@@ -63,7 +67,15 @@
       }
     },
     "cost_model": { "type": "object" },
-    "environment": { "type": "object" },
+    "environment": {
+      "type": "object",
+      "required": ["python", "platform"],
+      "additionalProperties": false,
+      "properties": {
+        "python": { "type": "string" },
+        "platform": { "type": "string" }
+      }
+    },
     "config": { "type": "object" },
     "metrics": {
       "type": "object",
@@ -115,6 +127,7 @@
             "type": "object",
             "required": ["provider", "mode", "schema_valid", "error_category",
                          "latency_ms", "input_bytes", "output_bytes"],
+            "additionalProperties": false,
             "properties": {
               "provider": { "type": "string" },
               "mode": { "type": "string" },
@@ -125,7 +138,11 @@
               "input_bytes": { "type": "integer", "minimum": 0 },
               "output_bytes": { "type": "integer", "minimum": 0 },
               "retries": { "type": "integer", "minimum": 0 },
-              "injected_fault": { "type": "boolean" }
+              "injected_fault": { "type": "boolean" },
+              "usage": {
+                "type": ["object", "null"],
+                "description": "Exact provider metrics/cost/usage where returned by the live endpoint (bounded numeric/bool passthrough + evidence meta); never an endpoint URL or credential value."
+              }
             }
           }
         }

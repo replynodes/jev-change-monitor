@@ -65,8 +65,13 @@ class ProviderResponse:
     usage: dict = field(default_factory=dict)
 
     def to_record(self) -> dict:
-        """Compact per-case record for result artifacts (values only; no secrets)."""
-        return {
+        """Compact per-case record for result artifacts (values only; no secrets).
+
+        ``usage`` (exact provider metrics/cost/usage where returned) is included
+        when non-empty; it is bounded by the provider and whole-artifact
+        redaction still applies on write.
+        """
+        record = {
             "provider": self.provider,
             "mode": self.mode,
             "schema_valid": self.schema_valid,
@@ -77,6 +82,9 @@ class ProviderResponse:
             "output_bytes": self.output_bytes,
             "retries": self.retries,
         }
+        if self.usage:
+            record["usage"] = self.usage
+        return record
 
 
 class JudgementProvider(Protocol):

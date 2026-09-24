@@ -86,6 +86,21 @@ Captured page content is untrusted input and is never executed or trusted:
   JSON in, stdout JSON out); env-configured only.
 - `jev-http` — live Jev via `JEV_ENDPOINT` + `JEV_API_KEY` (+ optional
   `JEV_MODEL`), OpenAI-compatible chat endpoint by default; never logs values.
+  Refuses to run when `JEV_PROTOCOL=evaluate`.
+- `jev-evaluate` — live Jev via the typed `/v1/evaluate` protocol:
+  `JEV_ENDPOINT` + `JEV_API_KEY` (+ optional `JEV_MODEL`), with
+  `JEV_PROTOCOL` unset or `evaluate`. Sends `{model, state, questions}` and
+  maps typed answers (`boolean`/`noul`/`choice`/`score`) into the
+  detector-result contract; unmappable answers are recorded as
+  `schema_invalid`/`provider` error, never fabricated (see
+  docs/benchmark-methodology.md). For the `price` detector the provider adds
+  three dynamic `choice` extraction questions (criteria derived only from
+  bounded candidate price tokens in the normalized evidence) and maps them
+  deterministically into the required `details.extraction`
+  (`amount`/`currency`/`period`/`amount_before`/`currency_before`/`direction`);
+  a choice outside the derived candidate set is unmappable — amounts are never
+  invented. Socket/read timeouts are classified `timeout` with bounded
+  backoff, distinct from provider errors.
 
 Live results must record `confidence_source = "jev-raw-probability"`.
 Without an authorized Jev runtime the benchmark emits a machine-readable
