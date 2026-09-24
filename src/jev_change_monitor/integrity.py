@@ -983,6 +983,286 @@ def timeout_classification_probe() -> list[str]:
     return problems
 
 
+def retry_semantics_probe() -> list[str]:
+    """Deterministic retry-semantics probe (loopback only, no network).
+
+    A scripted loopback TCP server proves the documented retry contract of
+    `JevEvaluateProvider.judge` (docs/benchmark-methodology.md), covering the
+    independent-review P2 findings without unit tests:
+
+    1. HTTP 429 (rate limit) is retried with the bounded Retry-After backoff
+       (here 0.05s) and a later success records `retries = attempt - 1` in
+       the returned ProviderResponse and its artifact record (never 0).
+    2. A socket/read timeout is retried with the bounded backoff and a later
+       success likewise records `retries = attempt - 1`.
+    3. A non-retryable HTTP status (503) is recorded immediately: the server
+       observes exactly ONE connection despite `retries=2`, and the response
+       is a bounded `provider`-category error (`HTTP 503`), `retries == 0`,
+       no fabricated result.
+    4. A non-timeout connection failure (connection refused) is recorded
+       immediately: `retries == 0`, bounded withheld `provider_error`, no
+       fabricated result.
+    """
+    import os
+    import socket
+    import threading
+    import time
+
+    from jev_change_monitor.benchmark import runner as runner_mod
+    from jev_change_monitor.detectors import get_detector
+    from jev_change_monitor.providers.jev_evaluate import JevEvaluateProvider
+
+    problems: list[str] = []
+    case = json.loads((EXAMPLES_DIR / "price" / "case.json").read_text(encoding="utf-8"))
+    request = runner_mod._request_for_case(case)  # noqa: SLF001 - shared request builder
+
+    ok_payload = {
+        "model": "jev-probe-model",
+        "answers": {
+            "valid": {"type": "boolean", "value": True},
+            "meaningful": {"type": "boolean", "value": True},
+            "change_type": {"type": "choice", "value": "price_increase"},
+            "importance": {"type": "choice", "value": "high"},
+            "should_alert": {"type": "boolean", "value": True},
+            "confidence": {"type": "score", "score": 3.0, "confidence": 0.9},
+            # judge() passes the bounded price candidate context for the price
+            # detector, so the extraction answers are required (same canonical
+            # candidate keys proven by extraction_mapping_probe).
+            "price_after": {"type": "choice", "value": "amt:39|cur:USD|per:mo"},
+            "price_before": {"type": "choice", "value": "amt:29|cur:USD|per:mo"},
+            "price_direction": {"type": "choice", "value": "up"},
+        },
+    }
+
+    def read_request(conn: socket.socket, timeout: float = 2.0) -> None:
+        """Consume the request (headers + Content-Length body) so the server
+        never races the client; small loopback bodies only."""
+        conn.settimeout(timeout)
+        data = b""
+        while b"\r\n\r\n" not in data:
+            try:
+                chunk = conn.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            data += chunk
+        head, _, _ = data.partition(b"\r\n\r\n")
+        length = 0
+        for line in head.split(b"\r\n"):
+            if line.lower().startswith(b"content-length:"):
+                try:
+                    length = int(line.split(b":", 1)[1].strip())
+                except ValueError:
+                    length = 0
+                break
+        left = length - (len(data) - len(head) - 4)
+        while left > 0:
+            try:
+                chunk = conn.recv(65536)
+            except OSError:
+                return
+            if not chunk:
+                return
+            left -= len(chunk)
+
+    def send_http(conn: socket.socket, status: bytes, body: bytes = b"",
+                  extra: bytes = b"") -> None:
+        conn.sendall(status + extra
+                     + b"Content-Length: " + str(len(body)).encode("ascii")
+                     + b"\r\nConnection: close\r\n\r\n" + body)
+
+    def run_server(behaviors: list[str]) -> tuple:
+        """Scripted loopback server; returns (port, connection_count, stop)."""
+        listen = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listen.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listen.bind(("127.0.0.1", 0))
+        listen.listen(8)
+        port = listen.getsockname()[1]
+        count: list[int] = [0]
+        stopped: list[bool] = [False]
+
+        def handle(conn: socket.socket, behavior: str) -> None:
+            try:
+                if behavior == "stall":
+                    # Accept, never respond: forces a real client read timeout.
+                    conn.settimeout(2.0)
+                    try:
+                        while conn.recv(65536):
+                            pass
+                    except OSError:
+                        pass
+                    time.sleep(4.0)
+                elif behavior == "ok":
+                    read_request(conn)
+                    send_http(conn, b"HTTP/1.1 200 OK\r\n",
+                              json.dumps(ok_payload).encode("utf-8"))
+                elif behavior == "ratelimit":
+                    read_request(conn)
+                    send_http(conn, b"HTTP/1.1 429 Too Many Requests\r\n",
+                              extra=b"Retry-After: 0.05\r\n")
+                elif behavior == "server_error":
+                    read_request(conn)
+                    send_http(conn, b"HTTP/1.1 503 Service Unavailable\r\n")
+            finally:
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+
+        def serve() -> None:
+            listen.settimeout(0.5)
+            while not stopped[0]:
+                try:
+                    conn, _addr = listen.accept()
+                except socket.timeout:
+                    continue
+                except OSError:
+                    return
+                idx = count[0]
+                count[0] += 1
+                threading.Thread(
+                    target=handle,
+                    args=(conn, behaviors[min(idx, len(behaviors) - 1)]),
+                    daemon=True,
+                ).start()
+
+        threading.Thread(target=serve, daemon=True).start()
+
+        def stop() -> None:
+            stopped[0] = True
+            try:
+                listen.close()
+            except OSError:
+                pass
+
+        return port, count, stop
+
+    original = {name: os.environ.get(name)
+                for name in ("JEV_ENDPOINT", "JEV_API_KEY", "JEV_MODEL", "JEV_PROTOCOL")}
+    listeners: list = []
+    try:
+        os.environ["JEV_API_KEY"] = _HTTP_API_KEY_POISON
+        os.environ["JEV_MODEL"] = "jev-probe-model"
+        os.environ["JEV_PROTOCOL"] = "evaluate"
+
+        def endpoint_for(port: int) -> str:
+            return f"http://127.0.0.1:{port}/v1/evaluate"
+
+        # --- 1. HTTP 429 -> success: truthfully retried, retries=1 ----------
+        port, count, stop = run_server(["ratelimit", "ok"])
+        listeners.append(stop)
+        os.environ["JEV_ENDPOINT"] = endpoint_for(port)
+        after_429 = JevEvaluateProvider(timeout_s=2.0, retries=2).judge(
+            get_detector("price"), request)
+        stop()
+        if not after_429.schema_valid or after_429.error_category != "none":
+            problems.append(
+                f"retry probe: 429 -> success must yield a clean result, "
+                f"got {after_429.error_category!r} / {after_429.provider_error!r}"
+            )
+        if after_429.retries != 1:
+            problems.append(
+                f"retry probe: 429 -> success must record retries=1, "
+                f"got {after_429.retries}"
+            )
+        if after_429.to_record().get("retries") != 1:
+            problems.append("retry probe: artifact record must carry retries=1 after a retry")
+        if count[0] != 2:
+            problems.append(
+                f"retry probe: 429 -> success expected exactly 2 connections, "
+                f"got {count[0]}"
+            )
+
+        # --- 2. timeout -> success: truthfully retried, retries=1 ----------
+        port, count, stop = run_server(["stall", "ok"])
+        listeners.append(stop)
+        os.environ["JEV_ENDPOINT"] = endpoint_for(port)
+        after_timeout = JevEvaluateProvider(timeout_s=0.4, retries=2).judge(
+            get_detector("price"), request)
+        stop()
+        if not after_timeout.schema_valid or after_timeout.error_category != "none":
+            problems.append(
+                f"retry probe: timeout -> success must yield a clean result, "
+                f"got {after_timeout.error_category!r} / {after_timeout.provider_error!r}"
+            )
+        if after_timeout.retries != 1:
+            problems.append(
+                f"retry probe: timeout -> success must record retries=1, "
+                f"got {after_timeout.retries}"
+            )
+        if count[0] != 2:
+            problems.append(
+                f"retry probe: timeout -> success expected exactly 2 connections, "
+                f"got {count[0]}"
+            )
+
+        # --- 3. HTTP 503: NOT retried; exactly one connection --------------
+        port, count, stop = run_server(["server_error"])
+        listeners.append(stop)
+        os.environ["JEV_ENDPOINT"] = endpoint_for(port)
+        server_error = JevEvaluateProvider(timeout_s=2.0, retries=2).judge(
+            get_detector("price"), request)
+        stop()
+        if server_error.error_category != "provider":
+            problems.append(
+                f"retry probe: HTTP 503 must keep error_category='provider', "
+                f"got {server_error.error_category!r}"
+            )
+        if "HTTP 503" not in (server_error.provider_error or ""):
+            problems.append(
+                f"retry probe: HTTP 503 provider_error must be bounded 'HTTP 503', "
+                f"got {server_error.provider_error!r}"
+            )
+        if "429" in (server_error.provider_error or ""):
+            problems.append("retry probe: HTTP 503 error must not mention 429")
+        if server_error.retries != 0:
+            problems.append(
+                f"retry probe: non-retryable HTTP 503 must stop immediately "
+                f"(retries=0), got {server_error.retries}"
+            )
+        if count[0] != 1:
+            problems.append(
+                f"retry probe: non-retryable HTTP 503 must open exactly ONE "
+                f"connection, got {count[0]}"
+            )
+        if server_error.result is not None or server_error.schema_valid:
+            problems.append("retry probe: a 503 failure must not fabricate a result")
+
+        # --- 4. connection refused: NOT retried ----------------------------
+        os.environ["JEV_ENDPOINT"] = "http://127.0.0.1:1/v1/evaluate"
+        refused = JevEvaluateProvider(timeout_s=2.0, retries=2).judge(
+            get_detector("price"), request)
+        if refused.error_category != "provider":
+            problems.append(
+                f"retry probe: connection refused must keep error_category='provider', "
+                f"got {refused.error_category!r}"
+            )
+        if "URLError (details withheld)" not in (refused.provider_error or ""):
+            problems.append(
+                f"retry probe: connection-refused provider_error must be bounded "
+                f"withheld, got {refused.provider_error!r}"
+            )
+        if refused.retries != 0:
+            problems.append(
+                f"retry probe: connection refused must stop immediately "
+                f"(retries=0), got {refused.retries}"
+            )
+        if refused.result is not None or refused.schema_valid:
+            problems.append("retry probe: a refused connection must not fabricate a result")
+        if "127.0.0.1" in (refused.provider_error or ""):
+            problems.append("retry probe: connection-refused error leaked the endpoint host")
+    finally:
+        for stop in listeners:
+            stop()
+        for name, value in original.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return problems
+
+
 def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     """All deterministic integrity checks; one problem per list entry."""
     problems: list[str] = []
@@ -994,4 +1274,5 @@ def run_redact_check(results_committed: Path = RESULTS_COMMITTED) -> list[str]:
     problems.extend(evaluate_provider_probe())
     problems.extend(extraction_mapping_probe())
     problems.extend(timeout_classification_probe())
+    problems.extend(retry_semantics_probe())
     return problems

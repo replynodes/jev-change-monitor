@@ -245,7 +245,13 @@ bare `TimeoutError`) is classified separately as
 exponential backoff (1s, 2s, 4s, capped at 8s) — never a fabricated semantic
 result; endpoint/key/error detail stays withheld (`"timeout (details
 withheld)"`). Both retry loops are capped by the provider's `retries` setting
-and record the exhausted `retries` count truthfully.
+and record the exhausted `retries` count truthfully. Any other HTTP status
+(4xx/5xx) and any non-timeout connection/other error is **not** retried: the
+first failure is recorded immediately as a bounded `provider`-category error
+(status code or withheld detail only), so a permanent 400/503 or a refused
+connection is never re-sent uselessly. A retry that eventually succeeds
+records `retries = attempt - 1` in the per-case result/artifact, matching
+`jev-http`.
 
 Run-local live runs write to the gitignored `results/runs/` (e.g.
 `results/runs/live-jev-dev.json`); committed artifacts are never overwritten.

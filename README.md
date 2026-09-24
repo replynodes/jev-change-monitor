@@ -77,7 +77,10 @@ them deterministically into the required `details.extraction` (`amount`,
 `currency`, `period`, `amount_before`, `currency_before`, `direction`) — an
 amount is never invented. Socket/read timeouts are classified separately as
 `timeout` with bounded backoff; HTTP 429 stays a bounded rate-limit provider
-error. `jev-http` remains the chat-completions protocol and refuses to run
+error (bounded `Retry-After`); any other HTTP 4xx/5xx and any non-timeout
+connection/other error stops immediately without a useless re-send. A success
+after retry(s) records the real `retries = attempt - 1` in the artifact.
+`jev-http` remains the chat-completions protocol and refuses to run
 when `JEV_PROTOCOL=evaluate`.
 
 Docker:
@@ -117,13 +120,19 @@ The launch thresholds from #487 are **not** passed by this repository today:
   review/adjudication, which is a separate launch blocker.
 - Live `jev-evaluate` held-out runs observe real metrics but do not meet the
   frozen #487 thresholds, so `launch_claim.status` stays `failed` — never
-  `passed`. The most recent run (gitignored `results/runs/live-jev-*.json`)
-  measured price `exact_price_accuracy` 0.886 below the 0.95 gate over the
-  exact 35-row extraction denominator, plus a price `false_change_rate` and a
-  saas_pricing `false_alert_rate` above their caps. When the gateway
-  rate-limits a run, the bounded HTTP 429 cases stay provider-error rows with
-  capped `Retry-After` backoff — never fake semantic results — and the
-  artifact records the evaluable subset explicitly.
+  `passed`. The most recent run (gitignored `results/runs/live-jev-*.json`,
+  111 cases, 109 evaluable) failed **all five** frozen threshold checks:
+  1. price `exact_price_accuracy` **0.886** < 0.95 (min), measured over the
+     exact 35-row extraction denominator (`price_cases_with_expectation`; 40
+     total price cases minus 5 no-expectation/noise cases);
+  2. price `false_change_rate` **0.143** > 0.02 (max);
+  3. saas_pricing `false_alert_rate` **0.154** > 0.10 (max);
+  4. product_change `precision` **0.833** < 0.90 (min);
+  5. product_change `false_alert_rate` **0.167** > 0.10 (max).
+  Two of the 111 cases were bounded provider errors (1× HTTP 429, 1× HTTP
+  503) — recorded as honest `provider`-category rows with truthful retry
+  counts, never fake semantic results — and the artifact records the
+  evaluable subset (109) explicitly.
 
 `jev-monitor gate --result <artifact>` tells you the launch claim for any
 artifact and refuses `PASS` while any launch blocker (missing live Jev run,

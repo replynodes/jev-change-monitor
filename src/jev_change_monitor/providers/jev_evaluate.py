@@ -68,7 +68,12 @@ and retried with a bounded deterministic backoff, mirroring the bounded 429
 ``Retry-After`` discipline; detail stays withheld exactly like other provider
 failures. HTTP 429 remains a ``provider``-category rate-limit failure with
 bounded ``Retry-After`` handling — it is never turned into a fabricated
-semantic result.
+semantic result. Any other HTTP status (4xx/5xx) and any non-timeout
+connection/other error is **not** retried: the first failure is recorded
+immediately as a bounded ``provider``-category error (status code or withheld
+detail only), so a permanent 400/503 or a refused connection is never
+re-sent uselessly. A retry that eventually succeeds records
+``retries = attempt - 1`` in the per-case result, matching ``jev-http``.
 """
 
 from __future__ import annotations
@@ -735,6 +740,10 @@ class JevEvaluateProvider:
                 response.input_bytes = len(body)
                 if self.model:
                     response.usage["model"] = self.model
+                # A request that succeeded after retry(s) must record the real
+                # retry count (attempt - 1), matching jev-http, so the artifact
+                # never claims 0 retries for a case that actually retried.
+                response.retries = attempt - 1
                 return response
             except urllib.error.HTTPError as exc:
                 # Bounded: status code only; never the URL or response body.
@@ -747,6 +756,9 @@ class JevEvaluateProvider:
                     last_error = "HTTP 429"
                     continue
                 last_error = f"HTTP {exc.code}"
+                # Any other HTTP 4xx/5xx is not retryable: stop immediately
+                # (a request the server already rejected is never re-sent).
+                break
             except urllib.error.URLError as exc:
                 # A socket/read timeout (URLError wrapping TimeoutError) is a
                 # distinct failure class: classified `timeout` and retried with
@@ -764,6 +776,9 @@ class JevEvaluateProvider:
                 else:
                     last_error = "URLError (details withheld)"
                     last_category = "provider"
+                    # Non-timeout connection failures are not retried: record
+                    # the first failure immediately (bounded, withheld).
+                    break
             except TimeoutError:
                 # Direct socket/read timeout (socket.timeout is TimeoutError on
                 # Python 3.10+); keep the same bounded retry/backoff.
@@ -777,6 +792,9 @@ class JevEvaluateProvider:
             except Exception as exc:  # noqa: BLE001 - normalize provider failure
                 last_error = f"{type(exc).__name__} (details withheld)"
                 last_category = "provider"
+                # Other unexpected errors are not retried either: record the
+                # first failure immediately (bounded, withheld).
+                break
         return ProviderResponse(
             provider=self.name, mode=self.mode, result=None, raw=None,
             latency_ms=0.0, input_bytes=len(body), output_bytes=0,
